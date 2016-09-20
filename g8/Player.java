@@ -8,40 +8,67 @@ import java.util.*;
 
 
 public class Player implements slather.sim.Player {
-    
-    private Random gen;
 
-    // global variables to store d and t for easy access
-    private double SYSTEM_D;
-    private double SYSTEM_T;
-    
+    private Random gen;
+    private double d;
+    private int t;
+
+    private static final int NUMDIRECTIONS = 4;   // CONSTANTS - number of directions
+    private static final int DURATION_CAP = 4;   // CONSTANTS - cap on traveling
+
     public void init(double d, int t) {
-        SYSTEM_D = d;
-        SYSTEM_T = t;
 	gen = new Random();
+	this.d = d;
+	this.t = t;
     }
 
     public Move play(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
 
+        Point currentPosition  = player_cell.getPosition();
+        int direction = getDirection(memory);
+        int duration = getDuration(memory);
+        int maxDuration = getMaxDuration(t, NUMDIRECTIONS);
+
+        // 0 = North
+        // 1 = East
+        // 2 = South
+        // 3 = West
+
+        duration++;
+        if (duration == maxDuration) {
+                direction++;
+                direction = direction % NUMDIRECTIONS;
+                memory = writeDirection(direction, memory);
+
+        }
+        memory = writeDuration(duration, memory, maxDuration);
+
+        Point destination = getNewDest(direction);
+        String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
+        String p = String.format("current x is %f and current y is %f", currentPosition.x, currentPosition.y);
+        String des = String.format("dest x is %f and dest y is %f", destination.x, destination.y);
+        System.out.println(s);
+        System.out.println(p);
+        System.out.println(des);
+        return new Move(destination, memory);
+
+        /*
 	if (player_cell.getDiameter() >= 2) // reproduce whenever possible
 	    return new Move(true, (byte)-1, (byte)-1);
-	if (memory > 0) { // follow previous direction unless it would cause a collision
-	    Point vector = extractVectorFromAngle( (int)memory);
-	    // check for collisions
-	    if (!collides( player_cell, vector, nearby_cells, nearby_pheromes))
-		return new Move(vector, memory);
-	}
+
+
+
 
 	// if no previous direction specified or if there was a collision, try random directions to go in until one doesn't collide
 	for (int i=0; i<4; i++) {
 	    int arg = gen.nextInt(180)+1;
 	    Point vector = extractVectorFromAngle(arg);
-	    if (!collides(player_cell, vector, nearby_cells, nearby_pheromes)) 
+	    if (!collides(player_cell, vector, nearby_cells, nearby_pheromes))
 		return new Move(vector, (byte) arg);
 	}
 
 	// if all tries fail, just chill in place
-	return new Move(new Point(0,0), (byte)0);
+	return new Move(new Point(0,0), (byte)0);*/
     }
 
     // check if moving player_cell by vector collides with any nearby cell or hostile pherome
@@ -50,13 +77,13 @@ public class Player implements slather.sim.Player {
 	Point destination = player_cell.getPosition().move(vector);
 	while (cell_it.hasNext()) {
 	    Cell other = cell_it.next();
-	    if ( destination.distance(other.getPosition()) < 0.5*player_cell.getDiameter() + 0.5*other.getDiameter() + 0.00011) 
+	    if ( destination.distance(other.getPosition()) < 0.5*player_cell.getDiameter() + 0.5*other.getDiameter() + 0.00011)
 		return true;
 	}
 	Iterator<Pherome> pherome_it = nearby_pheromes.iterator();
 	while (pherome_it.hasNext()) {
 	    Pherome other = pherome_it.next();
-	    if (other.player != player_cell.player && destination.distance(other.getPosition()) < 0.5*player_cell.getDiameter() + 0.0001) 
+	    if (other.player != player_cell.player && destination.distance(other.getPosition()) < 0.5*player_cell.getDiameter() + 0.0001)
 		return true;
 	}
 	return false;
@@ -68,6 +95,48 @@ public class Player implements slather.sim.Player {
 	double dx = Cell.move_dist * Math.cos(theta);
 	double dy = Cell.move_dist * Math.sin(theta);
 	return new Point(dx, dy);
+    }
+
+    private int getDirection(byte mem) {
+            return (mem & 3);
+    }
+
+    private int getDuration(byte mem) {
+            return ((mem >> 2) & 3);
+    }
+    private byte writeDirection(int direction, byte memory) {
+            int actualDirection = direction % NUMDIRECTIONS;
+            byte mem = (byte)((memory & 0b11111100) | actualDirection);
+            return mem;
+    }
+    private byte writeDuration(int duration, byte memory, int maxDuration) {
+            int actualDuration = duration % maxDuration;
+            byte mem = (byte)((memory & 0b11110011) | (actualDuration << 2));
+            return mem;
+    }
+
+    private int getMaxDuration(int t, int numdirs) {
+            return Math.min((t / numdirs), DURATION_CAP);
+    }
+
+    private Point getNewDest(int direction) {
+
+            if (direction == 0) {
+                    return new Point(0*Cell.move_dist,-1*Cell.move_dist);
+
+            } else if (direction == 1) {
+                    return new Point(1*Cell.move_dist,0*Cell.move_dist);
+
+            } else if (direction == 2) {
+                    return new Point(0*Cell.move_dist,1*Cell.move_dist);
+
+            } else if (direction == 3) {
+                    return new Point(-1*Cell.move_dist,0*Cell.move_dist);
+
+            } else {
+                    return new Point(0,0);
+            }
+
     }
 
 }
