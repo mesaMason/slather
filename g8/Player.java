@@ -16,6 +16,7 @@ public class Player implements slather.sim.Player {
     private static final int NUMDIRECTIONS = 4;   // CONSTANTS - number of directions
     private static final int DURATION_CAP = 4;   // CONSTANTS - cap on traveling
     private static final int FRIENDLY_AVOID_DIST = 5; // CONSTANTS - for random walker: turn away from friendlies that are in this radius
+    private static final double MAX_MOVEMENT = 1; // CONSTANTS - maximum movement rate (assumed to be 1mm?)
     
     public void init(double d, int t) {
 	gen = new Random();
@@ -50,7 +51,8 @@ public class Player implements slather.sim.Player {
         int duration = getDuration(memory);
         int maxDuration = getMaxDuration(t, NUMDIRECTIONS);
         int strategy = getStrategy(memory);
-
+        Move nextMove = null;
+        
 	if (player_cell.getDiameter() >= 2) // reproduce whenever possible
 	    return new Move(true, (byte) 0b10000000, (byte) 0);
         
@@ -78,18 +80,25 @@ public class Player implements slather.sim.Player {
             
             // if collides, try 20 different random directions
             if (collides(player_cell, destination, nearby_cells, nearby_pheromes)) {
+                nextMove = null;
+                
                 for (int i = 0; i < 20; i++) {
                     int arg = gen.nextInt(120);
                     Point vector = extractVectorFromAngle(arg);
-                    if (!collides(player_cell, vector, nearby_cells, nearby_pheromes))
-                        return new Move(vector, memory);
+                    if (!collides(player_cell, vector, nearby_cells, nearby_pheromes)) {
+                        nextMove = new Move(vector, memory);
+                        break;
+                    }
                 }
-                // if nothing worked, sit in place
-                return new Move(new Point(0,0), memory);
+                if (nextMove == null) { // if nothing worked, sit in place
+                    nextMove = new Move(new Point(0,0), memory);
+                }
+            } 
+            else { // no collision, free to make square move
+                nextMove = new Move(destination, memory);
             }
-            
-            return new Move(destination, memory);
-        } else {
+        } // end square walker strategy
+        else {
             /* Random walker strategy:
                Move away from friendly cells that are too close (specified by FRENDLY_AVOID_DIST)
                If no closeby friendly cells to avoid, act like default player (move in straight lines)
@@ -119,13 +128,18 @@ public class Player implements slather.sim.Player {
                 // if had a previous direction, keep going in that direction
                 if (prevAngle > 0) {
                     vector = extractVectorFromAngle( (int)prevAngle);
-                    if (!collides( player_cell, vector, nearby_cells, nearby_pheromes))
-                        return new Move(vector, memory);
+                    if (!collides( player_cell, vector, nearby_cells, nearby_pheromes)) {
+                        nextMove = new Move(vector, memory);
+                    }
                 }
 
-                // if will collide or didn't have a previous direction, pick a random direction
-                prevAngle = gen.nextInt(120);
-                vector = extractVectorFromAngle(prevAngle);
+                // if will collide or didn't have a previous direction, pick a random direction generate move
+                if (nextMove == null) {
+                    int newAngle = gen.nextInt(120);
+                    Point newVector = extractVectorFromAngle(newAngle);
+                    byte newMemory = (byte) (0b10000000 | newAngle);
+                    nextMove = new Move(newVector, newMemory);
+                }
             } else { // case: friendly cells too close, move in opposite direction
                 double avgX = sumX / ((double) count);
                 double avgY = sumY / ((double) count);
@@ -139,30 +153,37 @@ public class Player implements slather.sim.Player {
                 double awayY = (-(towardsAvgY)/distanceFromAvg) * Cell.move_dist;
 
                 // clear the previous vector bits
-                prevAngle = 0;
-                vector = new Point(awayX, awayY);
+                int newAngle = 0;
+                Point newVector = new Point(awayX, awayY);
+                byte newMemory = (byte) (0b10000000 | newAngle);
+                nextMove = new Move(newVector, newMemory);
             }
+
+            // candidate nextMove written, check for collision
             
-            if (collides(player_cell, vector, nearby_cells, nearby_pheromes)) {
+            if (collides(player_cell, nextMove.vector, nearby_cells, nearby_pheromes)) {
+                nextMove = null;
                 int arg = gen.nextInt(120);
                 // try 20 times to avoid collision
                 for (int i = 0; i < 20; i++) {
-                    vector = extractVectorFromAngle(arg);
-                    if (!collides(player_cell, vector, nearby_cells, nearby_pheromes)) {
-                        memory = (byte) (0b10000000 | arg);
-                        return new Move(vector, memory);
+                    Point newVector = extractVectorFromAngle(arg);
+                    if (!collides(player_cell, newVector, nearby_cells, nearby_pheromes)) {
+                        byte newMemory = (byte) (0b10000000 | arg);
+                        nextMove = new Move(newVector, newMemory);
+                        break;
                     }
-
                 }
-                // if still keeps colliding, stay in place
-                return new Move(new Point(0,0), (byte) 0b10000000);
-            }
-
-            // didn't collide, recreate memory with new vector and move
-            memory = (byte) (0b10000000 | prevAngle);
-            return new Move(vector, memory);
-        }
-    }
+                if (nextMove == null) { // if still keeps colliding, stay in place
+                    nextMove = new Move(new Point(0,0), (byte) 0b10000000);
+                }
+            } // end check candidate nextMove collision
+        } // end random walker
+        
+        System.out.println("Next move: " + nextMove.vector.x + ", " + nextMove.vector.y);
+        Point estimate = getVector(player_cell, player_cell, nearby_pheromes);
+        System.out.println("Estimated last move: " + estimate.x + ", " + estimate.y);
+        return nextMove;        
+    } // end Move()
 
     // check if moving player_cell by vector collides with any nearby cell or hostile pherome
     private boolean collides(Cell player_cell, Point vector, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
@@ -235,5 +256,65 @@ public class Player implements slather.sim.Player {
     private int getStrategy(byte memory) {
         int strategy = (memory >> 7) & 1;
         return strategy;
+    }
+    
+    /* Estimate the last known direction of a cell given pheromes that can be seen
+       Returns as a vector (Point object)
+       Method: for given cell, find pherome of the same type that is <= MAX_MOVEMENT
+         If more than 1 pherome found, movement cannot be determined, return MAX_MOVEMENT+1,MAX_MOVEMENT+1
+         If no pheromes found and cell is at max view distance, movement cannot be determined (otherwise 
+           it legitimately did not move!)
+     */
+    private Point getVector(Cell player_cell, Cell c, Set<Pherome> nearby_pheromes) {
+        Iterator<Pherome> pherome_it = nearby_pheromes.iterator();
+        double dX;
+        double dY;
+        int count = 0;
+        Pherome closest = null;
+        double cRadius = c.getDiameter()/2;
+        Point cPos = c.getPosition();
+        
+        while (pherome_it.hasNext()) {
+            Pherome curr = pherome_it.next();
+            Point currPos = curr.getPosition();
+            if (curr.player != c.player || currPos == cPos)
+                continue;
+            double distance = c.distance(curr) + cRadius;
+            if (distance <= MAX_MOVEMENT) {
+                count++;
+                closest = curr;
+            }
+        }
+
+        if (count > 1) { // more than one close pherome, vector cannot be determined
+            dX = MAX_MOVEMENT + 1;
+            dY = MAX_MOVEMENT + 1;
+            System.out.println("Found too many pheromes: " + count);
+            return new Point(dX, dY);
+        }
+        else if (count == 0) { // no pheromes deteced closeby
+            double distanceCelltoCell = player_cell.distance(c);
+            if ( (distanceCelltoCell + player_cell.getDiameter()/2 + c.getDiameter()/2) >= d ) {
+                // other cell is at edge of view, cannot determine vector
+                dX = MAX_MOVEMENT + 1;
+                dY = MAX_MOVEMENT + 1;
+                return new Point(dX, dY);
+            } else {
+                // other cell well within view and no closeby pheromes, so it actually didn't move
+                return new Point(0, 0);
+            }
+        } 
+        else if (count == 1) { // only 1 pherome detected, can get vector
+            Point cPosition = c.getPosition();
+            Point pPosition = closest.getPosition();
+            dX = cPosition.x - pPosition.x;
+            dY = cPosition.y - pPosition.y;
+            return new Point(dX, dY);
+        }
+        else {
+            dX = MAX_MOVEMENT + 1;
+            dY = MAX_MOVEMENT + 1;
+            return new Point(dX, dY);
+        }
     }
 }
