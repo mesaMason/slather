@@ -17,7 +17,7 @@ public class Player implements slather.sim.Player {
     private static final int MAX_SHAPE_MEM = 4;   // CONSTANTS - maximum shape size (in bits)
     private static final int MIN_SHAPE_MEM = 2;   // CONSTANTS - minimum shape size (in bits)
     private static final int DURATION_CAP = 4;   // CONSTANTS - cap on traveling
-    private static final int FRIENDLY_AVOID_DIST = 5; // CONSTANTS - for random walker: turn away from friendlies that are in this radius
+    private static final int AVOID_DIST = 5; // CONSTANTS - for random walker: turn away from friendlies that are in this radius
     private static final double MAX_MOVEMENT = 1; // CONSTANTS - maximum movement rate (assumed to be 1mm?)
     private int SHAPE_MEM_USAGE; // CONSTANTS - calculate this based on t
     private int EFFECTIVE_SHAPE_SIZE; // CONSTANTS - actual number of sides to our shape
@@ -102,7 +102,7 @@ public class Player implements slather.sim.Player {
         } // end square walker strategy
         else {
             /* Random walker strategy:
-               Move away from friendly cells that are too close (specified by FRENDLY_AVOID_DIST)
+               Move away from cells that are too close (specified by AVOID_DIST)
                If no closeby friendly cells to avoid, act like default player (move in straight lines)
              */
             int prevAngle = memory & 0b01111111;
@@ -113,12 +113,10 @@ public class Player implements slather.sim.Player {
             int count = 0;
             Point vector;
 
-            // calculate avg position of nearby friendly cells
+            // calculate avg position of nearby cells
             while (cell_it.hasNext()) {
                 Cell curr = cell_it.next();
-                if (curr.player != player_cell.player)
-                    continue;
-                if (player_cell.distance(curr) > FRIENDLY_AVOID_DIST) // don't worry about far away friendlies
+                if (player_cell.distance(curr) > AVOID_DIST) // don't worry about far away cells
                     continue;
                 Point currPos = curr.getPosition();
                 sumX += currPos.x;
@@ -126,7 +124,21 @@ public class Player implements slather.sim.Player {
                 count++;
             }
 
-            if (count == 0) { // case: no friendly cells to move away from
+            // add unfriendly pheromes
+            Iterator<Pherome> ph_it = nearby_pheromes.iterator();
+            while (ph_it.hasNext()) {
+                Pherome curr = ph_it.next();
+                if (curr.player == player_cell.player)
+                    continue;
+                if (player_cell.distance(curr) > AVOID_DIST)
+                    continue;
+                Point currPos = curr.getPosition();
+                sumX += currPos.x;
+                sumY += currPos.y;
+                count++;
+            }
+
+            if (count == 0) { // case: no cells to move away from
                 // if had a previous direction, keep going in that direction
                 if (prevAngle > 0) {
                     vector = extractVectorFromAngle( (int)prevAngle);
@@ -142,7 +154,7 @@ public class Player implements slather.sim.Player {
                     byte newMemory = (byte) (newAngle);
                     nextMove = new Move(newVector, newMemory);
                 }
-            } else { // case: friendly cells too close, move in opposite direction
+            } else { // case: cells too close, move in opposite direction
                 double avgX = sumX / ((double) count);
                 double avgY = sumY / ((double) count);
 
@@ -153,6 +165,37 @@ public class Player implements slather.sim.Player {
             
                 double awayX = (-(towardsAvgX)/distanceFromAvg) * Cell.move_dist;
                 double awayY = (-(towardsAvgY)/distanceFromAvg) * Cell.move_dist;
+
+                // check if cells are in the direction we are moving toward
+                cell_it = nearby_cells.iterator();
+                while (cell_it.hasNext()) {
+                    Cell curr = cell_it.next();
+                    if (player_cell.distance(curr) > AVOID_DIST) // don't worry about far away cells
+                        continue;
+                    Point currPos = curr.getPosition();
+                    Point playerPos = player_cell.getPosition();
+                    if (((currPos.x - playerPos.x) / (currPos.y - playerPos.y)) == (awayX / awayY)) {
+                        // try orthogonal vector if there are cells in the way
+                        boolean newOption = true;
+                        Iterator<Cell> test_cell_it = nearby_cells.iterator();
+                        while (test_cell_it.hasNext()) {
+                            Cell testCell = test_cell_it.next();
+                            if (player_cell.distance(testCell) > AVOID_DIST) // don't worry about far away cells
+                                continue;
+                            Point testPos = testCell.getPosition();
+                            if (((testPos.x + playerPos.y) / (testPos.y - playerPos.x)) == (-awayY / awayX)) {
+                                newOption = false;
+                                break;
+                            }
+                        }
+                        if (newOption) {
+                            double savedX = awayX;
+                            awayX = -awayY;
+                            awayY = savedX;
+                            break;
+                        }
+                    }
+                }
 
                 // clear the previous vector bits
                 int newAngle = 0;
