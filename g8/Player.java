@@ -14,14 +14,24 @@ public class Player implements slather.sim.Player {
     private int t;
 
     private static final int NUMDIRECTIONS = 4;   // CONSTANTS - number of directions
+    private static final int MAX_SHAPE_MEM = 4;   // CONSTANTS - maximum shape size (in bits)
+    private static final int MIN_SHAPE_MEM = 2;   // CONSTANTS - minimum shape size (in bits)
     private static final int DURATION_CAP = 4;   // CONSTANTS - cap on traveling
     private static final int FRIENDLY_AVOID_DIST = 5; // CONSTANTS - for random walker: turn away from friendlies that are in this radius
     private static final double MAX_MOVEMENT = 1; // CONSTANTS - maximum movement rate (assumed to be 1mm?)
+    private int SHAPE_MEM_USAGE; // CONSTANTS - calculate this based on t
+    private int EFFECTIVE_SHAPE_SIZE; // CONSTANTS - actual number of sides to our shape
     
     public void init(double d, int t) {
 	gen = new Random();
 	this.d = d;
 	this.t = t;
+        SHAPE_MEM_USAGE = (int) Math.ceil( Math.log(t)/Math.log(2) );
+        SHAPE_MEM_USAGE = Math.max(MIN_SHAPE_MEM, SHAPE_MEM_USAGE);
+        SHAPE_MEM_USAGE = Math.min(MAX_SHAPE_MEM, SHAPE_MEM_USAGE);
+        EFFECTIVE_SHAPE_SIZE = (int) Math.min( Math.pow(2, SHAPE_MEM_USAGE), t );
+        EFFECTIVE_SHAPE_SIZE = (int) Math.max( 4, EFFECTIVE_SHAPE_SIZE);
+        // TODO: put minimum for small t?
     }
 
     /*
@@ -31,8 +41,7 @@ public class Player implements slather.sim.Player {
       Memory byte for square walker:
       1 bit strategy
       3 bits empty for now
-      2 bits duration
-      2 bits direction
+      0-4 bits shape
       
       Memory byte for random walker:
       1 bit strategy
@@ -47,30 +56,22 @@ public class Player implements slather.sim.Player {
     public Move play(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
 
         Point currentPosition  = player_cell.getPosition();
-        int direction = getDirection(memory);
-        int duration = getDuration(memory);
-        int maxDuration = getMaxDuration(t, NUMDIRECTIONS);
         int strategy = getStrategy(memory);
         Move nextMove = null;
-        
+        String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
+        System.out.println("Memory byte: " + s);
 	if (player_cell.getDiameter() >= 2) // reproduce whenever possible
 	    return new Move(true, (byte) 0b10000000, (byte) 0);
         
-        if (strategy == 0) {
-            /* Square walker strategy
-             */
-            duration++;
-            if (duration == maxDuration) {
-                direction++;
-                direction = direction % NUMDIRECTIONS;
-                memory = writeDirection(direction, memory);
-            }
-            memory = writeDuration(duration, memory, maxDuration);
+        if (strategy == 1) {
 
-            Point destination = getNewDest(direction);
+            int currDirection = getDirection(memory);
+            Point destination = getVectorFromDirection(currDirection);
+            int nextDirection = (currDirection + 1) % EFFECTIVE_SHAPE_SIZE;
+            byte newMemory = writeDirection(nextDirection, memory);
 
             /*
-            String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
+
             String p = String.format("current x is %f and current y is %f", currentPosition.x, currentPosition.y);
             String des = String.format("dest x is %f and dest y is %f", destination.x, destination.y);
             System.out.println(s);
@@ -81,7 +82,7 @@ public class Player implements slather.sim.Player {
             // if collides, try 20 different random directions
             if (collides(player_cell, destination, nearby_cells, nearby_pheromes)) {
                 nextMove = null;
-                
+                /*
                 for (int i = 0; i < 20; i++) {
                     int arg = gen.nextInt(120);
                     Point vector = extractVectorFromAngle(arg);
@@ -90,12 +91,13 @@ public class Player implements slather.sim.Player {
                         break;
                     }
                 }
+                */
                 if (nextMove == null) { // if nothing worked, sit in place
                     nextMove = new Move(new Point(0,0), memory);
                 }
             } 
             else { // no collision, free to make square move
-                nextMove = new Move(destination, memory);
+                nextMove = new Move(destination, newMemory);
             }
         } // end square walker strategy
         else {
@@ -137,7 +139,7 @@ public class Player implements slather.sim.Player {
                 if (nextMove == null) {
                     int newAngle = gen.nextInt(120);
                     Point newVector = extractVectorFromAngle(newAngle);
-                    byte newMemory = (byte) (0b10000000 | newAngle);
+                    byte newMemory = (byte) (newAngle);
                     nextMove = new Move(newVector, newMemory);
                 }
             } else { // case: friendly cells too close, move in opposite direction
@@ -155,7 +157,7 @@ public class Player implements slather.sim.Player {
                 // clear the previous vector bits
                 int newAngle = 0;
                 Point newVector = new Point(awayX, awayY);
-                byte newMemory = (byte) (0b10000000 | newAngle);
+                byte newMemory = (byte) (newAngle);
                 nextMove = new Move(newVector, newMemory);
             }
 
@@ -168,13 +170,13 @@ public class Player implements slather.sim.Player {
                 for (int i = 0; i < 20; i++) {
                     Point newVector = extractVectorFromAngle(arg);
                     if (!collides(player_cell, newVector, nearby_cells, nearby_pheromes)) {
-                        byte newMemory = (byte) (0b10000000 | arg);
+                        byte newMemory = (byte) (arg);
                         nextMove = new Move(newVector, newMemory);
                         break;
                     }
                 }
                 if (nextMove == null) { // if still keeps colliding, stay in place
-                    nextMove = new Move(new Point(0,0), (byte) 0b10000000);
+                    nextMove = new Move(new Point(0,0), (byte) 0);
                 }
             } // end check candidate nextMove collision
         } // end random walker
@@ -211,17 +213,23 @@ public class Player implements slather.sim.Player {
 	return new Point(dx, dy);
     }
 
+    /* Gets vector based on direction (which side of the shape cell will move to)
+     */
+    private Point getVectorFromDirection(int direction) {
+        double theta = Math.toRadians((360 / EFFECTIVE_SHAPE_SIZE) * direction);
+        double dx = Cell.move_dist * Math.cos(theta);
+        double dy = Cell.move_dist * Math.sin(theta);
+        return new Point(dx, dy);
+    }
+    
     private int getDirection(byte mem) {
-            return (mem & 3);
+        return (mem & (int) (Math.pow(2.0, SHAPE_MEM_USAGE) - 1) );
     }
 
-    private int getDuration(byte mem) {
-            return ((mem >> 2) & 3);
-    }
     private byte writeDirection(int direction, byte memory) {
-            int actualDirection = direction % NUMDIRECTIONS;
-            byte mem = (byte)((memory & 0b11111100) | actualDirection);
-            return mem;
+        byte mask = (byte) (((int) Math.pow(2.0, 8) - 1) << SHAPE_MEM_USAGE);
+        byte mem = (byte)((memory & mask) | direction);
+        return mem;
     }
     private byte writeDuration(int duration, byte memory, int maxDuration) {
             int actualDuration = duration % maxDuration;
