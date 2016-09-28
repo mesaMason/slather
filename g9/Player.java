@@ -22,7 +22,7 @@ public class Player implements slather.sim.Player {
 	}
 
 	public Move play(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
-		if (player_cell.getDiameter() >= 2 && (calCrowdInDirection(player_cell, (int)memory, nearby_cells, nearby_pheromes) > COMF_RANGE)) // reproduce when it is not very crowd
+		if (player_cell.getDiameter() >= 2 /*&& (calCrowdInDirection(player_cell, (int)memory, nearby_cells, nearby_pheromes) > COMF_RANGE)*/) // reproduce when it is not very crowd
 			return new Move(true, (byte)-1, (byte)-1);
 
 		if (memory > 0) { // follow previous direction in early stage, try least crowd direction in later

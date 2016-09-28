@@ -10,9 +10,13 @@ import java.util.*;
 public class Player implements slather.sim.Player {
     
     private Random gen;
+    private double d;
+    private int t;
 
     public void init(double d, int t) {
 	gen = new Random();
+	this.d = d;
+	this.t = t;
     }
 
     public Move play(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
