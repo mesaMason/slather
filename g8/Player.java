@@ -107,7 +107,8 @@ public class Player implements slather.sim.Player {
              Point nextPoint = new Point(-avg_x, -avg_y);
              int count = 0;
              int maxTries = 100;
-             while (nextPoint.x == 0 && nextPoint.y == 0) {
+             while ((nextPoint.x == 0 && nextPoint.y == 0)
+                    || collides(player_cell, nextPoint, nearby_cells, nearby_pheromes)) {
                  // if tried maximum # of times without success, just stay still
                  if (count == maxTries) {
                      nextPoint = new Point(0,0);
