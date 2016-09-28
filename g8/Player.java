@@ -22,7 +22,8 @@ public class Player implements slather.sim.Player {
     private int SHAPE_MEM_USAGE; // CONSTANTS - calculate this based on t
     private int EFFECTIVE_SHAPE_SIZE; // CONSTANTS - actual number of sides to our shape
 
-    public void init(double d, int t, int side_length) {
+    
+    public void init(double d, int t, int sideLength) {
 	gen = new Random();
 	this.d = d;
 	this.t = t;
@@ -103,8 +104,20 @@ public class Player implements slather.sim.Player {
                  avg_x = avg_x * (Cell.move_dist / hyp);
                  avg_y = avg_y * (Cell.move_dist / hyp);
              }
-
-             return new Move(new Point(-avg_x, -avg_y), memory);
+             Point nextPoint = new Point(-avg_x, -avg_y);
+             int count = 0;
+             int maxTries = 100;
+             while (nextPoint.x == 0 && nextPoint.y == 0) {
+                 // if tried maximum # of times without success, just stay still
+                 if (count == maxTries) {
+                     nextPoint = new Point(0,0);
+                     break;
+                 }
+                 int angle = gen.nextInt(120);
+                 nextPoint = extractVectorFromAngle(angle);
+                 count++;
+             }
+             return new Move(nextPoint, memory);
 
 
          } // end square walker strategy
@@ -250,13 +263,13 @@ public class Player implements slather.sim.Player {
 	Point destination = player_cell.getPosition().move(vector);
 	while (cell_it.hasNext()) {
 	    Cell other = cell_it.next();
-	    if ( destination.distance(other.getPosition()) < 0.5*player_cell.getDiameter() + 0.5*other.getDiameter() + 0.00011)
+	    if ( destination.distance(other.getPosition()) < 0.5*player_cell.getDiameter()*1.01 + 0.5*other.getDiameter() + 0.00011)
 		return true;
 	}
 	Iterator<Pherome> pherome_it = nearby_pheromes.iterator();
 	while (pherome_it.hasNext()) {
 	    Pherome other = pherome_it.next();
-            if (other.player != player_cell.player && destination.distance(other.getPosition()) < 0.5*player_cell.getDiameter() + 0.0001)
+            if (other.player != player_cell.player && destination.distance(other.getPosition()) < 0.5*player_cell.getDiameter()*1.01 + 0.0001)
                 return true;
 	}
 	return false;
