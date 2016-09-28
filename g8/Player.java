@@ -21,7 +21,7 @@ public class Player implements slather.sim.Player {
     private static final double MAX_MOVEMENT = 1; // CONSTANTS - maximum movement rate (assumed to be 1mm?)
     private int SHAPE_MEM_USAGE; // CONSTANTS - calculate this based on t
     private int EFFECTIVE_SHAPE_SIZE; // CONSTANTS - actual number of sides to our shape
-    
+
     public void init(double d, int t) {
 	gen = new Random();
 	this.d = d;
@@ -42,7 +42,7 @@ public class Player implements slather.sim.Player {
       1 bit strategy
       3 bits empty for now
       0-4 bits shape
-      
+
       Memory byte for random walker:
       1 bit strategy
       7 bits previous direction
@@ -53,54 +53,68 @@ public class Player implements slather.sim.Player {
       2 = South
       3 = West
      */
-    public Move play(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
+     public Move play(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
 
-        Point currentPosition  = player_cell.getPosition();
-        int strategy = getStrategy(memory);
-        Move nextMove = null;
-        String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
-        System.out.println("Memory byte: " + s);
-	if (player_cell.getDiameter() >= 2) // reproduce whenever possible
-	    return new Move(true, (byte) 0b10000000, (byte) 0);
-        
-        if (strategy == 1) {
+         Point currentPosition  = player_cell.getPosition();
+         int strategy = getStrategy(memory);
+         Move nextMove = null;
+         String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
+         System.out.println("Memory byte: " + s);
 
-            int currDirection = getDirection(memory);
-            Point destination = getVectorFromDirection(currDirection);
-            int nextDirection = (currDirection + 1) % EFFECTIVE_SHAPE_SIZE;
-            byte newMemory = writeDirection(nextDirection, memory);
 
-            /*
 
-            String p = String.format("current x is %f and current y is %f", currentPosition.x, currentPosition.y);
-            String des = String.format("dest x is %f and dest y is %f", destination.x, destination.y);
-            System.out.println(s);
-            System.out.println(p);
-            System.out.println(des);
-            */
-            
-            // if collides, try 20 different random directions
-            if (collides(player_cell, destination, nearby_cells, nearby_pheromes)) {
-                nextMove = null;
-                /*
-                for (int i = 0; i < 20; i++) {
-                    int arg = gen.nextInt(120);
-                    Point vector = extractVectorFromAngle(arg);
-                    if (!collides(player_cell, vector, nearby_cells, nearby_pheromes)) {
-                        nextMove = new Move(vector, memory);
-                        break;
-                    }
-                }
-                */
-                if (nextMove == null) { // if nothing worked, sit in place
-                    nextMove = new Move(new Point(0,0), memory);
-                }
-            } 
-            else { // no collision, free to make square move
-                nextMove = new Move(destination, newMemory);
-            }
-        } // end square walker strategy
-        else {
+
+         if (player_cell.getDiameter() >= 2) // reproduce whenever possible
+            return new Move(true, (byte) 0b10000000, (byte) 0);
+
+
+
+
+        /*
+
+            Clustering ALgorithm - we are going to take a leaf out of group 1's
+            and start clustering after a certain point
+
+        */
+         if (strategy == 1) {
+
+             // get the average vector for all cells, take the inverse of the vector
+             // and then use that to move a bit. add a little bit of aggressiveness
+             // if there are several cells nearby
+
+             double vectx = 0.0;
+             double vecty = 0.0;
+             for (Cell nc : nearby_cells) {
+                 double weight = 1.0;
+                 if (nc.player == player_cell.player)
+                    weight = 0.9;
+                 else
+                    weight = 1.1;
+                 Point ncp = nc.getPosition();
+                 Point pcp = player_cell.getPosition();
+                 vectx = vectx + weight*(ncp.x - pcp.x);
+                 vecty = vecty + weight*(ncp.y - pcp.y);
+             }
+             double avg_x = vectx / Math.max(nearby_cells.size(), 1);
+             double avg_y = vecty / Math.max(nearby_cells.size(), 1);
+
+             double hyp = Math.sqrt(Math.pow(avg_x, 2.0) + Math.pow(avg_y, 2.0));
+             if (hyp > Cell.move_dist) {
+                 avg_x = avg_x * (Cell.move_dist / hyp);
+                 avg_y = avg_y * (Cell.move_dist / hyp);
+             }
+
+             return new Move(new Point(-avg_x, -avg_y), memory);
+
+
+         } // end square walker strategy
+
+
+
+
+
+         else {
+
             /* Random walker strategy:
                Move away from cells that are too close (specified by AVOID_DIST)
                If no closeby friendly cells to avoid, act like default player (move in straight lines)
@@ -162,7 +176,7 @@ public class Player implements slather.sim.Player {
                 double towardsAvgY = avgY - currentPosition.y;
 
                 double distanceFromAvg = Math.hypot(towardsAvgX, towardsAvgY);
-            
+
                 double awayX = (-(towardsAvgX)/distanceFromAvg) * Cell.move_dist;
                 double awayY = (-(towardsAvgY)/distanceFromAvg) * Cell.move_dist;
 
@@ -205,7 +219,7 @@ public class Player implements slather.sim.Player {
             }
 
             // candidate nextMove written, check for collision
-            
+
             if (collides(player_cell, nextMove.vector, nearby_cells, nearby_pheromes)) {
                 nextMove = null;
                 int arg = gen.nextInt(120);
@@ -223,11 +237,11 @@ public class Player implements slather.sim.Player {
                 }
             } // end check candidate nextMove collision
         } // end random walker
-        
+
         System.out.println("Next move: " + nextMove.vector.x + ", " + nextMove.vector.y);
         Point estimate = getVector(player_cell, player_cell, nearby_pheromes);
         System.out.println("Estimated last move: " + estimate.x + ", " + estimate.y);
-        return nextMove;        
+        return nextMove;
     } // end Move()
 
     // check if moving player_cell by vector collides with any nearby cell or hostile pherome
@@ -247,7 +261,7 @@ public class Player implements slather.sim.Player {
 	}
 	return false;
     }
-    
+
     // convert an angle (in 3-deg increments) to a vector with magnitude Cell.move_dist (max allowed movement distance)
     private Point extractVectorFromAngle(int arg) {
 	double theta = Math.toRadians( 3* (double)arg );
@@ -264,7 +278,7 @@ public class Player implements slather.sim.Player {
         double dy = Cell.move_dist * Math.sin(theta);
         return new Point(dx, dy);
     }
-    
+
     private int getDirection(byte mem) {
         return (mem & (int) (Math.pow(2.0, SHAPE_MEM_USAGE) - 1) );
     }
@@ -308,12 +322,12 @@ public class Player implements slather.sim.Player {
         int strategy = (memory >> 7) & 1;
         return strategy;
     }
-    
+
     /* Estimate the last known direction of a cell given pheromes that can be seen
        Returns as a vector (Point object)
        Method: for given cell, find pherome of the same type that is <= MAX_MOVEMENT
          If more than 1 pherome found, movement cannot be determined, return MAX_MOVEMENT+1,MAX_MOVEMENT+1
-         If no pheromes found and cell is at max view distance, movement cannot be determined (otherwise 
+         If no pheromes found and cell is at max view distance, movement cannot be determined (otherwise
            it legitimately did not move!)
      */
     private Point getVector(Cell player_cell, Cell c, Set<Pherome> nearby_pheromes) {
@@ -324,7 +338,7 @@ public class Player implements slather.sim.Player {
         Pherome closest = null;
         double cRadius = c.getDiameter()/2;
         Point cPos = c.getPosition();
-        
+
         while (pherome_it.hasNext()) {
             Pherome curr = pherome_it.next();
             Point currPos = curr.getPosition();
@@ -354,7 +368,7 @@ public class Player implements slather.sim.Player {
                 // other cell well within view and no closeby pheromes, so it actually didn't move
                 return new Point(0, 0);
             }
-        } 
+        }
         else if (count == 1) { // only 1 pherome detected, can get vector
             Point cPosition = c.getPosition();
             Point pPosition = closest.getPosition();
