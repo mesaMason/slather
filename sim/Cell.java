@@ -20,7 +20,7 @@ public class Cell extends GridObject{
 
     public Cell(Point position, int player) {
 	this(position, player, 1);
-    }
+    }   
 
     public Point getPosition() {
 	return position;
@@ -30,16 +30,16 @@ public class Cell extends GridObject{
 	return diameter;
     }
 
-    // called by simulator
-
+    // called by simulator    
+    
     protected void move(Point vector, Set<Pherome> pheromes, Set<Cell> cells, boolean log) {
 	if (vector.norm() > move_dist + 0.00001) {
 	    if (log)
 		System.err.println("Cell cannot move more than " + move_dist + " per turn.");
 	    return;
-	}
+	}	   
 	Point new_position = position.move(vector);
-	Iterator<Pherome> pherome_it = pheromes.iterator();
+	Iterator<Pherome> pherome_it = pheromes.iterator();	
 	while (pherome_it.hasNext()) {
 	    Pherome next = pherome_it.next();
 	    if (new_position.distance(next.getPosition()) < 0.5*diameter && player != next.player) {
@@ -57,10 +57,10 @@ public class Cell extends GridObject{
 		return;
 	    }
 	}
-	position = new_position;
+	position = new_position;	
     }
 
-
+    
     // grow by 1% or max possible without colliding
     protected void step(Set<Pherome> pheromes, Set<Cell> cells) {
 	Iterator<Pherome> pherome_it = pheromes.iterator();
@@ -73,7 +73,7 @@ public class Cell extends GridObject{
 	Iterator<Cell> cell_it = cells.iterator();
 	while (cell_it.hasNext()) {
 	    Cell next = cell_it.next();
-	    new_diameter = Math.min(new_diameter, 2*(distance(next) - 0.5*next.getDiameter()));
+	    new_diameter = Math.min(new_diameter, 2*(distance(next) + 0.5*getDiameter()));
 	}
 	if (new_diameter > 2)
 	    new_diameter = 2.0000001;

@@ -97,7 +97,7 @@ class Simulator {
 		players[g] = null;
 	    }
 	    if (players[g] != null)
-		players[g].init(d,t);
+		players[g].init(d,t,side_length);
 	}
 	// check if there are any valid players
 	for (int g = 0 ; g < p ; g++)
@@ -112,7 +112,7 @@ class Simulator {
 	// age all deposited pheromes first
 	grid.age_pheromes();
 
-	ArrayList<Cell> cells = grid.shuffle_cells();
+	final ArrayList<Cell> cells = grid.shuffle_cells();
 	final int numCells = cells.size();
 	for (int i=0; i<numCells; i++) { // only loop through first numCells cells, ignoring cells that are added at end of array through reproduction this turn
 	    final Cell active_cell = cells.get(i);
@@ -159,7 +159,6 @@ class Simulator {
 			new_cell.move(new Point(-1*dx, -1*dy), nearby_pheromes, nearby_cells, log);
 			cells.get(i).memory = move.memory;
 			new_cell.memory = move.daughter_memory;
-			cells.add(new_cell);
 			grid.add(new_cell);
 			score[active_player]++;
 			if (log)
@@ -209,7 +208,8 @@ class Simulator {
 	long turn = 0;
 	for (;;) {
 	    // run next turn
-	    println("### beg of turn " + turn + " ###");
+	    if (log)
+		println("### beg of turn " + turn + " ###");
 	    next();
 	    if (turns_without_reproduction >= 100)
 		break;
@@ -320,13 +320,15 @@ class Simulator {
 	    System.out.close();
 	}
 	// print parameters
-	System.err.println("Players: " + p);
-	System.err.println("Groups: " + Arrays.toString(groups));
-	System.err.println("Cells: " + n);
-	System.err.println("Pherome duration: " + t);
-	System.err.println("Verbose: " + (verbose   ? "yes" : "no"));
-	System.err.println("Recompile: " + (recompile ? "yes" : "no"));
-	if (!gui)
+	if (log) {
+	    System.err.println("Players: " + p);
+	    System.err.println("Groups: " + Arrays.toString(groups));
+	    System.err.println("Cells: " + n);
+	    System.err.println("Pherome duration: " + t);
+	    System.err.println("Verbose: " + (verbose   ? "yes" : "no"));
+	    System.err.println("Recompile: " + (recompile ? "yes" : "no"));
+	}
+	if (!gui && log) 
 	    System.err.println("GUI: disabled");
 	else if (refresh < 0)
 	    System.err.println("GUI: enabled  (0 FPS)  [reload manually]");
@@ -334,7 +336,8 @@ class Simulator {
 	    System.err.println("GUI: enabled  (max FPS)");
 	else {
 	    double fps = 1000.0 / refresh;
-	    System.err.println("GUI: enabled  (up to " + fps + " FPS)");
+	    if (log)
+		System.err.println("GUI: enabled  (up to " + fps + " FPS)");
 	}
 	// initialize and play
 	if (!init()) {

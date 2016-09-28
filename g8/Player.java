@@ -22,7 +22,7 @@ public class Player implements slather.sim.Player {
     private int SHAPE_MEM_USAGE; // CONSTANTS - calculate this based on t
     private int EFFECTIVE_SHAPE_SIZE; // CONSTANTS - actual number of sides to our shape
 
-    public void init(double d, int t) {
+    public void init(double d, int t, int side_length) {
 	gen = new Random();
 	this.d = d;
 	this.t = t;
