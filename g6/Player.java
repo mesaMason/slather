@@ -114,12 +114,11 @@ public class Player implements slather.sim.Player {
 
 			// sort points into friendly and enemy cell positions
 			for (Cell currCell : nearby_cells) {
-				/*if (currCell.player == 6) {
-					System.out.println(currCell.player+","+player_cell.player);
+				if (currCell.player == 6) {
 					friendly_cells.add(currCell);
-				} else {*/
+				} else {
 					enemy_cells.add(currCell);
-				//}
+				}
 			}
 
 			/*

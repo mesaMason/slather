@@ -40,6 +40,10 @@ public class Vector {
         return new Vector(this.x * scalar, this.y * scalar);
     }
 
+    public double length() {
+        return Math.sqrt(this.x * this.x + this.y * this.y);
+    }
+
     public double getX() {
         return x;
     }
