@@ -1,4 +1,4 @@
-package slather.g8;
+package slather.g82;
 
 import slather.sim.Cell;
 import slather.sim.Point;
@@ -269,60 +269,73 @@ public class Player implements slather.sim.Player {
         int state = (((byte) (memory & 0b00100000)) >> 5) & 1;
         byte count = (byte) (memory & 0b11111);
         int tEffective = Math.min(t, MAX_T);
-        int maxCount = tEffective + 1;
+        byte newMemory = memory;
 
+        Iterator<Pherome> pherome_it = nearby_pheromes.iterator();
+        boolean exactlyOnPherome = false;
+        boolean radiusTouchingPherome = false;
+        while (pherome_it.hasNext()) {
+            Pherome other = pherome_it.next();
+            if (other.player == player_cell.player) {
+                double dist = player_cell.distance(other);
+                double radius = player_cell.getDiameter()/2;
+                if (dist >= -radius*1.02 && dist <= -radius*.98) {
+                    exactlyOnPherome = true;
+                }
+                else if (dist <= 0.02 && dist >= -0.02) {
+                    radiusTouchingPherome = true;
+                }
+            }
+        }
+
+        double arc = (360 / tEffective);
+        double angle = ((arc * (count)) ) % 360;
+        double theta = Math.toRadians(angle);
+        double dx = Cell.move_dist * Math.cos(theta);
+        double dy = Cell.move_dist * Math.sin(theta);
+        
         if (state == 0) {
-            double arc = (360 / tEffective);
-            double angle = ((arc * (count+1)) ) % 360;
-            System.out.println("traveling angle: " + angle);
-            double theta = Math.toRadians(angle);
-            double dx = Cell.move_dist * Math.cos(theta);
-            double dy = Cell.move_dist * Math.sin(theta);
-            count++;
-            Point vector = new Point(dx, dy);
-            byte newMemory = memory;
-            if (count == maxCount) {
+            if (count == 0 && player_cell.getDiameter() == 1 ) {
+                // start of game, move anywhere to initiate pherome trail
+                count++;
+                newMemory = (byte) (newMemory | count);
+                return new Move(new Point(1,0), (byte) newMemory);
+            }
+            else if (count == 0 && player_cell.getDiameter() >= 2) {
+                // now maximal size, change state and tighten radius of circle
+                System.out.println("TIGHTEN CIRCLE");
+                angle = 60; // move to 1 distance away from top pherome
+                theta = Math.toRadians(angle);
+                dx = Cell.move_dist * Math.cos(theta);
+                dy = Cell.move_dist * Math.sin(theta);
                 newMemory = (byte) (memory & 0b11000000);
                 newMemory = (byte) (newMemory | 0b00100000);
             }
             else {
+                count = (byte)((count + 1) % tEffective);
+                System.out.println("traveling angle: " + angle);
                 newMemory = (byte) (memory & 0b11100000);
                 newMemory = (byte) (newMemory | count);
             }
+            Point vector = new Point(dx, dy);
             return new Move(vector, newMemory);
         }
         else {
-            /* Two cases: either you are exactly on the pherome (about to start the spiral)
-               or your edge touches a pherome (are already in the spiral)
-             */
-            Iterator<Pherome> pherome_it = nearby_pheromes.iterator();
-            boolean exactlyOnPherome = false;
-            boolean radiusTouchingPherome = false;
-            while (pherome_it.hasNext()) {
-                Pherome other = pherome_it.next();
-                if (other.player == player_cell.player) {
-                    double dist = player_cell.distance(other);
-                    double radius = player_cell.getDiameter()/2;
-                    if (dist >= -radius*1.02 && dist <= -radius*.98) {
-                        exactlyOnPherome = true;
-                    }
-                    else if (dist <= 0.02 && dist >= -0.02) {
-                        radiusTouchingPherome = true;
-                    }
-                }
-            }
 
-            if (exactlyOnPherome) {
-                // start the spiral
-            }
-            else if (radiusTouchingPherome) {
-                // continue spiral
-            }
-            else {
-                // something messed up here, stop circling strategy
-            }
-
-            return new Move(new Point(1,0), memory);
+            // state == 1, are on inner radius, move in small circle
+            double isoAngle = (180 - arc) / 2;
+            double angleC = isoAngle - 60;
+            double c = Math.toRadians(angleC);
+            double newSideLen = Math.abs(Math.sin(c) * 2);
+            angle += arc / 2; // rotate polygon by half an arc
+            theta = Math.toRadians(angle);
+            dx = newSideLen * Math.cos(theta);
+            dy = newSideLen * Math.sin(theta);
+            count = (byte) ((count + 1) % tEffective);
+            newMemory = (byte) (memory & 0b11100000);
+            newMemory = (byte) (newMemory | count);
+            System.out.println("Small circle, angle: " + angle + ", move dist: " + newSideLen);
+            return new Move(new Point(dx,dy), newMemory);
         } // end state == 1
 
     } // end circleStrategy()
