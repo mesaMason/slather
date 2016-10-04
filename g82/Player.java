@@ -63,8 +63,14 @@ public class Player implements slather.sim.Player {
          String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
          //System.out.println("Memory byte: " + s);
          
-         if (true)
-             return circleStrategy(player_cell, memory, nearby_cells, nearby_pheromes);
+         if (strategy == 1) {
+             nextMove = circleStrategy(player_cell, memory, nearby_cells, nearby_pheromes);
+             if (collides(player_cell, nextMove.vector, nearby_cells, nearby_pheromes)) {
+                 nextMove = new Move(new Point(0,0), (byte)0);
+             }
+             return nextMove;
+         }
+
 
          if (player_cell.getDiameter() >= 2) // reproduce whenever possible
             return new Move(true, (byte) 0b10000000, (byte) 0);
@@ -78,7 +84,7 @@ public class Player implements slather.sim.Player {
             and start clustering after a certain point
 
         */
-         if (strategy == 1) {
+         if (strategy == 4) {
 
              // get the average vector for all cells, take the inverse of the vector
              // and then use that to move a bit. add a little bit of aggressiveness
