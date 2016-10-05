@@ -38,16 +38,14 @@ public class Player implements slather.sim.Player {
 
     /*
       Memory byte setup:
-      1 bit strategy (currently either square walker or random walker)
+      2 bits strategy (circle, cluster, random direction)
 
-      Memory byte for square walker:
-      1 bit strategy
-      3 bits empty for now
-      0-4 bits shape
+      Memory byte for cluster strategy
+      2 bits strategy
 
       Memory byte for random walker:
-      1 bit strategy
-      7 bits previous direction
+      2 bits strategy
+      6 bits previous direction
 
       Directions:
       0 = North
@@ -62,34 +60,28 @@ public class Player implements slather.sim.Player {
          Move nextMove = null;
          String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
          //System.out.println("Memory byte: " + s);
-         
+
          if (strategy == 1) {
              nextMove = circleStrategy(player_cell, memory, nearby_cells, nearby_pheromes);
-             if (collides(player_cell, nextMove.vector, nearby_cells, nearby_pheromes)) {
-                 nextMove = new Move(new Point(0,0), (byte)0);
+             if (collides(player_cell, nextMove.vector, nearby_cells, nearby_pheromes)
+                 || t < 10) {
+                 nextMove = new Move(new Point(0,0), (byte)0b11000000); // become clusterer if can't circle
              }
              return nextMove;
          }
 
 
          if (player_cell.getDiameter() >= 2) // reproduce whenever possible
-            return new Move(true, (byte) 0b10000000, (byte) 0);
-
-
-
+            return new Move(true, (byte) 0b01000000, (byte) memory);
 
         /*
-
             Clustering ALgorithm - we are going to take a leaf out of group 1's
             and start clustering after a certain point
-
         */
-         if (strategy == 4) {
-
+         if (strategy == 3) {
              // get the average vector for all cells, take the inverse of the vector
              // and then use that to move a bit. add a little bit of aggressiveness
              // if there are several cells nearby
-
              double vectx = 0.0;
              double vecty = 0.0;
              for (Cell nc : nearby_cells) {
@@ -121,26 +113,18 @@ public class Player implements slather.sim.Player {
                      nextPoint = new Point(0,0);
                      break;
                  }
-                 int angle = gen.nextInt(120);
+                 int angle = gen.nextInt(60);
                  nextPoint = extractVectorFromAngle(angle);
                  count++;
              }
              return new Move(nextPoint, memory);
-
-
-         } // end square walker strategy
-
-
-
-
-
+         } // end cluster strategy
          else {
-
             /* Random walker strategy:
                Move away from cells that are too close (specified by AVOID_DIST)
                If no closeby friendly cells to avoid, act like default player (move in straight lines)
              */
-            int prevAngle = memory & 0b01111111;
+            int prevAngle = memory & 0b00111111;
 
             Iterator<Cell> cell_it = nearby_cells.iterator();
             double sumX = 0;
@@ -184,7 +168,7 @@ public class Player implements slather.sim.Player {
 
                 // if will collide or didn't have a previous direction, pick a random direction generate move
                 if (nextMove == null) {
-                    int newAngle = gen.nextInt(120);
+                    int newAngle = gen.nextInt(60);
                     Point newVector = extractVectorFromAngle(newAngle);
                     byte newMemory = (byte) (newAngle);
                     nextMove = new Move(newVector, newMemory);
@@ -243,7 +227,7 @@ public class Player implements slather.sim.Player {
 
             if (collides(player_cell, nextMove.vector, nearby_cells, nearby_pheromes)) {
                 nextMove = null;
-                int arg = gen.nextInt(120);
+                int arg = gen.nextInt(60);
                 // try 20 times to avoid collision
                 for (int i = 0; i < 20; i++) {
                     Point newVector = extractVectorFromAngle(arg);
@@ -259,9 +243,7 @@ public class Player implements slather.sim.Player {
             } // end check candidate nextMove collision
         } // end random walker
 
-        System.out.println("Next move: " + nextMove.vector.x + ", " + nextMove.vector.y);
         Point estimate = getVector(player_cell, player_cell, nearby_pheromes);
-        System.out.println("Estimated last move: " + estimate.x + ", " + estimate.y);
         return nextMove;
     } // end Move()
 
@@ -309,7 +291,6 @@ public class Player implements slather.sim.Player {
             }
             else if (count == 0 && player_cell.getDiameter() >= 2) {
                 // now maximal size, change state and tighten radius of circle
-                System.out.println("TIGHTEN CIRCLE");
                 angle = 60; // move to 1 distance away from top pherome
                 theta = Math.toRadians(angle);
                 dx = Cell.move_dist * Math.cos(theta);
@@ -319,7 +300,6 @@ public class Player implements slather.sim.Player {
             }
             else {
                 count = (byte)((count + 1) % tEffective);
-                System.out.println("traveling angle: " + angle);
                 newMemory = (byte) (memory & 0b11100000);
                 newMemory = (byte) (newMemory | count);
             }
@@ -340,7 +320,6 @@ public class Player implements slather.sim.Player {
             count = (byte) ((count + 1) % tEffective);
             newMemory = (byte) (memory & 0b11100000);
             newMemory = (byte) (newMemory | count);
-            System.out.println("Small circle, angle: " + angle + ", move dist: " + newSideLen);
             return new Move(new Point(dx,dy), newMemory);
         } // end state == 1
 
@@ -364,9 +343,9 @@ public class Player implements slather.sim.Player {
 	return false;
     }
 
-    // convert an angle (in 3-deg increments) to a vector with magnitude Cell.move_dist (max allowed movement distance)
+    // convert an angle (in 6-deg increments) to a vector with magnitude Cell.move_dist (max allowed movement distance)
     private Point extractVectorFromAngle(int arg) {
-	double theta = Math.toRadians( 3* (double)arg );
+	double theta = Math.toRadians( 6* (double)arg );
 	double dx = Cell.move_dist * Math.cos(theta);
 	double dy = Cell.move_dist * Math.sin(theta);
 	return new Point(dx, dy);
@@ -421,8 +400,8 @@ public class Player implements slather.sim.Player {
     }
 
     private int getStrategy(byte memory) {
-        int strategy = (memory >> 7) & 1;
-        return strategy;
+        byte strategy = (byte)((memory >> 6) & 0b00000011);
+        return (int) strategy;
     }
 
     /* Estimate the last known direction of a cell given pheromes that can be seen
@@ -456,7 +435,6 @@ public class Player implements slather.sim.Player {
         if (count > 1) { // more than one close pherome, vector cannot be determined
             dX = MAX_MOVEMENT + 1;
             dY = MAX_MOVEMENT + 1;
-            System.out.println("Found too many pheromes: " + count);
             return new Point(dX, dY);
         }
         else if (count == 0) { // no pheromes deteced closeby

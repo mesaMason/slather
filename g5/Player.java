@@ -4,6 +4,7 @@ import slather.sim.Cell;
 import slather.sim.Point;
 import slather.sim.Move;
 import slather.sim.Pherome;
+import slather.sim.GridObject;
 import java.util.*;
 
 
@@ -14,36 +15,152 @@ public class Player implements slather.sim.Player {
     int t_;
     double d_;
 
-    public void init(double d, int t) {
+    public void init(double d, int t, int side_length) {
         gen = new Random();
         t_ = t;
         d_ = d;
     }
 
+    private Point pathOfLeastResistance(Cell player_cell, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
+        class GridObjectAnglePair <GridObjectAnglePair>{
+            GridObject gridObject;
+            Point angle;
+            public GridObjectAnglePair(GridObject obj, Point ang) {
+                angle = ang;
+                gridObject = obj;
+            }
+        }
+        
+        class GridObjectAnglePairComparator implements Comparator<GridObjectAnglePair> {
+            @Override
+            public int compare(GridObjectAnglePair a, GridObjectAnglePair b) {
+                double angle1 = Math.atan2(a.angle.y, a.angle.x);
+                double angle2 = Math.atan2(b.angle.y, b.angle.x);
+                if(angle1==angle2) return 0;
+                return angle1<angle2?-1:1;
+            }   
+        }
+        
+        List<GridObjectAnglePair> nearby_list = new ArrayList<GridObjectAnglePair>(); 
+        for(GridObject cell : nearby_cells) {
+            nearby_list.add(new GridObjectAnglePair(cell, getClosestDirection(player_cell.getPosition(), cell.getPosition())));
+        }
+        for(GridObject pherome : nearby_pheromes) {
+            if(pherome.player != player_cell.player) {
+                nearby_list.add(new GridObjectAnglePair(pherome, getClosestDirection(player_cell.getPosition(), pherome.getPosition())));
+            }
+        }
+        nearby_list.sort(new GridObjectAnglePairComparator());
+        if(nearby_list.size()>1) {
+            double widest = 0;
+            int widest_index = -1;
+            double prev_angle = Math.atan2(nearby_list.get(0).angle.y, nearby_list.get(0).angle.x);
+            for(int i = 1; i < nearby_list.size(); ++i) {
+                double angle1 = Math.atan2(nearby_list.get(i).angle.y, nearby_list.get(i).angle.x);
+                double angle2 = Math.atan2(nearby_list.get(i-1).angle.y, nearby_list.get(i-1).angle.x);
+                if( widest < angle1 - angle2 ) {
+                    widest = angle1 - angle2;
+                    widest_index = i;
+                }
+            }
+            double angle1 = Math.atan2(nearby_list.get(0).angle.y, nearby_list.get(0).angle.x);
+            double angle2 = Math.atan2(nearby_list.get(nearby_list.size()-1).angle.y, nearby_list.get(nearby_list.size()-1).angle.x);
+            
+            if(widest < angle1 + 2*Math.PI - angle2 ) {
+                widest = angle1 + 2*Math.PI - angle2;
+                widest_index = 0;
+            }
+            Point p1 = nearby_list.get(widest_index).angle;
+            Point p2 = nearby_list.get(widest_index-1<0?nearby_list.size()-1:widest_index-1).angle;
+            
+            p2 = rotate_counter_clockwise(p2, widest/2);
+            
+            
+            //return new Move(p3, memory);
+            return p2;
+        } else if(nearby_list.size() == 1) {
+            return new Point(-nearby_list.get(0).angle.x,-nearby_list.get(0).angle.y);
+        }
+        return new Point(0,0);
+    }
+
+    Point rotate_counter_clockwise(Point vector, double angle) {
+		double newx, newy,x,y;
+		x = vector.x;
+		y = vector.y;
+		newx = x*Math.cos(angle) - y*Math.sin(angle);
+		newy = y*Math.cos(angle) + x*Math.sin(angle);
+		return new Point(newx, newy);
+	}
+    
     public Move play(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
         // reproduce whenever possible
         if (player_cell.getDiameter() >= 2) {
             return new Move(true, (byte)0, (byte)0);
         }
 
+        Point nextPath = pathOfLeastResistance(player_cell, nearby_cells, nearby_pheromes);
+
+        if(nextPath.x != 0 && nextPath.y != 0) {
+            if(!collides(player_cell, nextPath, nearby_cells, nearby_pheromes)) {
+                return new Move(nextPath, (byte)(int)((Math.toDegrees(Math.atan2(nextPath.y, nextPath.x))/2)));
+            }
+        } else {
+            // continue moving in the same direction as before
+            Point vector = extractVectorFromAngle( (int)memory);
+            // check for collisions
+            if (!collides( player_cell, vector, nearby_cells, nearby_pheromes))
+            return new Move(vector, memory);
+        }
+        
         // Offensive strategy
-        if(memory > 0) {
+        /*if(memory > 0) {
             int cellX = 0;
             int cellY = 0;
 
             // Look at nearby cells and go toward opposing players 
             // and away from friendly cells
             for (Cell c : nearby_cells) {
+
+                int counter = 0;
+                int friendly_counter = 0;
+                final int THRESHOLD = 6;
+
+                double distance = player_cell.distance(c);
+
                 if(c.player != player_cell.player) {
+                    counter++;
+
                     // TODO: If we're being encroached, perhaps the strategy should
                     //       be shifted so we move away from all cells until we're less encroached.
-                    cellX += c.getPosition().x - player_cell.getPosition().x;
-                    cellY += c.getPosition().y - player_cell.getPosition().y;
+
+                    
+                    if(player_cell.getDiameter() >= 1.9) {
+                        cellX -= (c.getPosition().x - player_cell.getPosition().x)*distance;
+                        cellY -= (c.getPosition().y - player_cell.getPosition().y)*distance;
+                    } else if (counter > THRESHOLD) {
+                        cellX += (c.getPosition().x - player_cell.getPosition().x)*distance;
+                        cellY += (c.getPosition().y - player_cell.getPosition().y)*distance;
+                    } else {
+                        cellX -= (c.getPosition().x - player_cell.getPosition().x)*distance;
+                        cellY -= (c.getPosition().y - player_cell.getPosition().y)*distance;
+                    }
                     // TODO: Weight the contribution by distance to cell
                     //       This could help, probably for large d? maybe not?
+                    // TODO: Perhaps look at pheromes too and move away from friendly 
+                    // ones so as to explore unexplored territory 
+
+
                 } else {
-                    cellX -= c.getPosition().x - player_cell.getPosition().x;
-                    cellY -= c.getPosition().y - player_cell.getPosition().y;
+                    friendly_counter++;
+
+                    //if(friendly_counter < 5) {
+                    //    cellX += c.getPosition().x - player_cell.getPosition().x;
+                    //    cellY += c.getPosition().y - player_cell.getPosition().y;                        
+                    //} else {
+                    cellX -= (c.getPosition().x - player_cell.getPosition().x)*distance;
+                    cellY -= (c.getPosition().y - player_cell.getPosition().y)*distance;
+                    //}
                 }
             }
 
@@ -55,19 +172,15 @@ public class Player implements slather.sim.Player {
                 return new Move(vector, memory);
             } else {
                 // otherwise move toward enemies and away from friendlies
-                return new Move(new Point(cellX / Math.hypot(cellX, cellY), 
-                                          cellY / Math.hypot(cellX, cellY)),
-                                          (byte)((Math.atan2(cellY, cellX))/2));
-            }
-        }
 
-        // TODO: this is probably stale code
-        if (memory > 0) { // follow previous direction unless it would cause a collision
-            Point vector = extractVectorFromAngle( (int)memory);
-            // check for collisions
-            if (!collides( player_cell, vector, nearby_cells, nearby_pheromes))
-            return new Move(vector, memory);
-        }
+                Point newDir = new Point(cellX / Math.hypot(cellX, cellY), 
+                                          cellY / Math.hypot(cellX, cellY));
+
+                if(!collides(player_cell, newDir, nearby_cells, nearby_pheromes)) {
+                    return new Move(newDir, (byte)((Math.atan2(cellY, cellX))/2));
+                }
+            }
+        }*/
 
         // Generate a random new direction to travel
         for (int i=0; i<4; i++) {
@@ -144,5 +257,58 @@ public class Player implements slather.sim.Player {
     double dy = Cell.move_dist * Math.sin(theta);
     return new Point(dx, dy);
     }
+    private double getDistanceDirect(Point first, Point second) {
+		double dist_square = (first.x - second.x)*(first.x - second.x) + (first.y - second.y)*(first.y - second.y);
+    	double dist = Math.sqrt(dist_square);
+    	return dist;
+	}
 
+    private double getDistance(Point first, Point second) {
+    	double x = second.x;
+    	double y = second.y;
+    	double dist = 100;
+    	for(int area_x = -1; area_x <= 1; area_x ++) {
+    		for(int area_y = -1; area_y <= 1; area_y ++) {
+    			x = second.x + area_x*100;
+    			y = second.y + area_y*100;
+    			double d = getDistanceDirect(first, new Point(x,y));
+    			if( dist > d) {
+    				dist = d;
+    			}
+    		}
+    	}
+    	//System.out.println("distance to " + second.x + " " + second.y +"= " + dist);
+    	return dist;
+    }
+    //of first to second
+    private Point getClosestDirection(Point first, Point second) {
+    	System.out.println(first.x +" " + first.y +" " + second.x +" "+ second.y);
+    	double x = second.x;
+    	double y = second.y;
+    	double dist = 100;
+    	Point best = null;
+    	for(int area_x = -1; area_x <= 1; area_x ++) {
+    		for(int area_y = -1; area_y <= 1; area_y ++) {
+    			x = second.x + area_x*100;
+    			y = second.y + area_y*100;
+    			double d = getDistanceDirect(first, new Point(x ,y ));
+    			if( dist > d) {
+    				dist = d;
+    				best = new Point(x-first.x,y-first.y);
+    			}
+    		}
+    	}
+		if(best == null) System.out.println("best null");
+    	return getUnitVector(best);
+    }
+    
+    private Point getUnitVector(Point point) {
+    	double x = point.x, y = point.y;
+    	double norm = Math.hypot(x, y);
+    	x /= norm;
+    	y /= norm;
+		
+    	return new Point(x, y);
+    }
+    
 }
