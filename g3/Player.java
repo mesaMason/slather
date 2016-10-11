@@ -12,8 +12,7 @@ public class Player implements slather.sim.Player {
     private double d;
     private int t;
     private int side_length;
-    private final int CLOSE_RANGE = 5;
-    private final int NEIGHBOR_THRESHOLD = 10;
+    private final int CLOSE_RANGE_VISION = 5;
 
     public void init(double d, int t, int side_length) {
 		gen = new Random();
@@ -28,113 +27,93 @@ public class Player implements slather.sim.Player {
 //		System.out.println(bitset.toString());
 		
 		//Get the first 6 bits out of memory
-		int f6bits = readF6Bits(memory);
+		//int f6bits = readF6Bits(memory);
 		//Get the last 2 bits out of memory
-		int l2bits = readL2Bits(memory);
+		//int l2bits = readL2Bits(memory);
 
-		Set<Cell> closest_cells = closeRangeCells(player_cell, nearby_cells);
-
-		if (closest_cells.size() > NEIGHBOR_THRESHOLD) {
-			if (l2bits < 3) {
-				++l2bits;
-			}
-		}
 //		System.out.println("Memory is: " + memory);
 //		System.out.println("First 6 bits: " + f6bits + "\t Last 2 bits: " + l2bits);				
 		
-		if (player_cell.getDiameter() >= 2){ // reproduce whenever possible
-
-			Random rand = new Random();
-			
+		if (player_cell.getDiameter() >= 2){ // reproduce whenever possible			
+			// Use code below if want to have different first 6 bits and last 2 bits
 			//byte memory1 = (byte) ((f6bits << 2) | (0x03 & l2bits)); //First daughter keeps same strategy
 			//byte memory2 = (byte) ((f6bits << 2) | (0x03 & (l2bits)));
-			byte memory1 = writeMemoryByte(f6bits, l2bits);
-			byte memory2 = writeMemoryByte(f6bits, 0);
+			//byte memory1 = writeMemoryByte(f6bits, l2bits);
+			//byte memory2 = writeMemoryByte(f6bits, 0);
 			
+			byte memory1 = memory;
+			byte memory2 = (byte) ((memory + 90) % 180);
 			return new Move(true, memory1, memory2);
 		}
 
-		// endgame strategy
-		if(l2bits==3) {
-			for (int i=0; i<4; i++) {
-				int angle = i * 90;
-				Point vector = extractVectorFromAngle(angle);
-				if (!collides(player_cell, vector, nearby_cells, nearby_pheromes)){
-					memory = (byte) ((f6bits << 2) | (0x03 & l2bits));
-					return new Move(vector, memory);
-				}
-			}
-			// if cannot move in any cardinal direction just stay in place
-			return new Move(new Point(0, 0), (byte) 0);
-		}
-		// normal strategy
-		else {
-			ArrayList<Integer> cellAngleList = generateAngleListOfNearbyCells(player_cell,nearby_cells, false);
-			ArrayList<Integer> pheromeAngleList = generateAngleListOfNearbyPheromes(player_cell,nearby_pheromes, true);
-			ArrayList<Integer> angleList = new ArrayList<Integer>();
-			angleList.addAll(cellAngleList);
-			angleList.addAll(pheromeAngleList);
-			Collections.sort(angleList);
+		ArrayList<Integer> cellAngleList = generateAngleListOfNearbyCells(player_cell,nearby_cells, false);
+		ArrayList<Integer> pheromeAngleList = generateAngleListOfNearbyPheromes(player_cell,nearby_pheromes, true);
+		ArrayList<Integer> angleList = new ArrayList<Integer>();
+		angleList.addAll(cellAngleList);
+		angleList.addAll(pheromeAngleList);
+		Collections.sort(angleList);
 //			System.out.println(angleList);
-			
-			if(angleList.isEmpty()){
-				int finalAngle = f6bits*6;
-				Point vector = extractVectorFromAngle(finalAngle);
-				if (!collides(player_cell, vector, nearby_cells, nearby_pheromes)){
-					memory = writeMemoryByte(f6bits,l2bits);
-					return new Move(vector, memory);
-				}
-			}
-			if(angleList.size()==1){
-				int finalAngle = (angleList.get(0)+180)%360;
-				f6bits = finalAngle/6;
-				Point vector = extractVectorFromAngle(finalAngle);
-				if (!collides(player_cell, vector, nearby_cells, nearby_pheromes)){
-					memory = writeMemoryByte(f6bits,l2bits);
-					return new Move(vector, memory);
-				}
-			}
-			else if(angleList.size()>=2){
-				int maxDiff = angleList.get(0)-angleList.get(angleList.size()-1)+360;
-				int index = angleList.size()-1;
-				for(int i=0; i<angleList.size()-1; i++){
-					//Don't consider if causes collision
-					if (collides(player_cell, extractVectorFromAngle((angleList.get(i+1)+angleList.get(i))/2), nearby_cells, nearby_pheromes)){
-						memory = writeMemoryByte(f6bits,l2bits);
-						continue;
-					}
-					
-					
-					if(	(angleList.get(i+1)-angleList.get(i)) > maxDiff	){
-						maxDiff = (angleList.get(i+1)-angleList.get(i));
-						index = i;
-					}
-				}
-				int finalAngle = angleList.get(index) + maxDiff/2;
-				finalAngle %= 360;
-				f6bits = finalAngle/6;
-				Point vector = extractVectorFromAngle(finalAngle);
-				if (!collides(player_cell, vector, nearby_cells, nearby_pheromes)){
-					memory = writeMemoryByte(f6bits,l2bits);
-					return new Move(vector, memory);
-				}
-			}
-			
-			//ToDo: 
-			//If you can't find anything, go towards your closest pherome
-			//MODULARIZE ENTIRE CODE	
-		}
 		
-		// If there was a collision, try
-		// random directions to go in until one doesn't collide
-		for (int i = 0; i < 4; i++) {
-//			int arg = gen.nextInt(180) + 1;
-			f6bits = gen.nextInt(60);
-			Point vector = extractVectorFromAngle(f6bits*6);
+		if(angleList.isEmpty()){
+			int finalAngle = memory*2;
+			Point vector = extractVectorFromAngle(finalAngle);
 			if (!collides(player_cell, vector, nearby_cells, nearby_pheromes)){
-				memory = writeMemoryByte(f6bits,l2bits);
 				return new Move(vector, memory);
 			}
+		}
+		else if(angleList.size()==1){
+			int finalAngle = (angleList.get(0)+180)%360;
+			Point vector = extractVectorFromAngle(finalAngle);
+			if (!collides(player_cell, vector, nearby_cells, nearby_pheromes)){
+				memory = (byte) (finalAngle/2);
+				return new Move(vector, memory);
+			}
+		}
+		else{
+			LinkedList<Integer> possibleAngles = new LinkedList<Integer>();
+			// first take care of special case between first and last cell
+			int maxDiff = angleList.get(0)-angleList.get(angleList.size()-1)+360;
+			int bisectAngle = angleList.get(angleList.size()-1) + maxDiff/2;
+			possibleAngles.addFirst(bisectAngle);
+			
+			for(int i=0; i<angleList.size()-1; i++){
+				//Don't consider if causes collision
+				bisectAngle = ((angleList.get(i+1) + angleList.get(i)) % 360) / 2; 
+				if (collides(player_cell, extractVectorFromAngle(bisectAngle), nearby_cells, nearby_pheromes)){
+					continue;
+				}
+				
+				int thisDiff = angleList.get(i+1) - angleList.get(i);
+				if(	thisDiff > maxDiff	){
+					possibleAngles.addFirst(bisectAngle); // sorting angles list from best to worst
+					maxDiff = thisDiff;
+				}
+			}
+			for(int j=0; j<possibleAngles.size(); j++){
+				int best_angle = possibleAngles.get(j);
+				Point vector = extractVectorFromAngle(best_angle);
+				if (!collides(player_cell, vector, nearby_cells, nearby_pheromes)){
+					memory = (byte) (best_angle/2); // keep within 8 bits
+					return new Move(vector, memory);
+				}
+			}
+		}	
+	
+		// If there was a collision, try a few random directions to go in until one doesn't collide
+		for (int i = 0; i < 10; i++) {
+			int rand_angle = gen.nextInt(360);
+			Point rand_vector = extractVectorFromAngle(rand_angle);
+			if (!collides(player_cell, rand_vector, nearby_cells, nearby_pheromes)){
+				memory = (byte) (rand_angle/2);
+				return new Move(rand_vector, memory);
+			}
+		}
+
+		// If no successful random direction, try reversing
+		memory = (byte) ((memory+90) % 360);
+		Point rev_vector = extractVectorFromAngle(memory);
+		if (!collides(player_cell, rev_vector, nearby_cells, nearby_pheromes)){
+			return new Move(rev_vector, memory);
 		}
 
 		// if all tries fail, just chill in place
@@ -175,7 +154,7 @@ public class Player implements slather.sim.Player {
     private Set<Cell> closeRangeCells(Cell source_cell, Set<Cell> all_cells) {
     	Set<Cell> closest_cells = new HashSet<Cell>();
 		for (Cell other_cell : all_cells) {
-			if (source_cell.distance(other_cell) < CLOSE_RANGE) {
+			if (source_cell.distance(other_cell) < CLOSE_RANGE_VISION) {
 				closest_cells.add(other_cell);
 			}
 		}
@@ -212,8 +191,12 @@ public class Player implements slather.sim.Player {
 	private ArrayList<Integer> generateAngleListOfNearbyCells(Cell player_cell, Set<Cell> nearby_cells, boolean ignoreSamePlayer){
 		ArrayList<Integer> angleList = new ArrayList<Integer>();
 		for(Cell c : nearby_cells){
-			if(ignoreSamePlayer && (c.player == player_cell.player)) //Ignore your own pheromes
+			if(ignoreSamePlayer && (c.player == player_cell.player)) { //Ignore your own pheromes
 				continue;
+			}
+			if(player_cell.distance(c) > CLOSE_RANGE_VISION) {
+				continue;
+			}
 			double cX = c.getPosition().x;
 			double cY = c.getPosition().y;
 			double tX = player_cell.getPosition().x;
