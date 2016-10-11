@@ -19,6 +19,10 @@ public class Player implements slather.sim.Player {
     private static final int DURATION_CAP = 4;   // CONSTANTS - cap on traveling
     private static final int AVOID_DIST = 5; // CONSTANTS - for random walker: turn away from friendlies that are in this radius
     private static final double MAX_MOVEMENT = 1; // CONSTANTS - maximum movement rate (assumed to be 1mm?)
+    private static final int MAX_SIGHT_TRIGGER = 3; // CONSTANTS - radius beyond which we dont care about cells to look for widest angle
+    private static final int MAX_TRIES = 30; // CONSTANT - max tries to reduce vector
+    private static final double INWARD_MOVE_DIST = 0.95; // CONSTANT - amount to move inwards to the center
+    private static final int EXPLODE_MAX_DIST = 16; // CONSTANT - max counter for explode strategy
     private int SHAPE_MEM_USAGE; // CONSTANTS - calculate this based on t
     private int EFFECTIVE_SHAPE_SIZE; // CONSTANTS - actual number of sides to our shape
 
@@ -60,10 +64,7 @@ public class Player implements slather.sim.Player {
          int strategy = getStrategy(memory);
          Move nextMove = null;
          String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
-         System.out.println("Memory byte: " + s);
-
-
-
+         //System.out.println("Memory byte: " + s);
 
          if (player_cell.getDiameter() >= 2) {
             memory = (byte)(memory & 0b10001111);
@@ -71,7 +72,10 @@ public class Player implements slather.sim.Player {
          }
 
 
-
+         if (true) {
+             return explode(player_cell, memory, nearby_cells, nearby_pheromes);
+         }
+         
         /*
 
             Clustering ALgorithm - we are going to take a leaf out of group 1's
@@ -310,6 +314,114 @@ public class Player implements slather.sim.Player {
         System.out.println("Estimated last move: " + estimate.x + ", " + estimate.y);
         return nextMove;
     } // end Move()
+
+    /* move towards and away from the center point
+       explode out to t/2+1 radius (maximum of EXPLODE_MAX_DIST)
+       Memory byte:
+        - 2 bits strategy
+        - 1 bit unused
+        - 4 bits counter
+        - 1 bit INWARD/OUTWARD
+     */
+    private Move explode(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
+        String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
+        Point currPos = player_cell.getPosition();
+        Point nextVector = null;
+        byte nextMemory = memory;
+        Move nextMove = null;
+        Point toCenter = new Point(1,0); // TODO: find vector to center
+        Point awayCenter = new Point(-toCenter.x, -toCenter.y);
+        byte inOrOut = (byte) (memory & 0b00000001);
+        int currCount = (memory >> 1) & 0b00001111;
+        int effT = Math.min(t/2 + 1, EXPLODE_MAX_DIST);
+        if (currCount == 0) {
+            nextMemory = (byte) (memory ^ 0b00000001);
+            inOrOut = (byte) (nextMemory & 0b00000001);
+        }
+        if (inOrOut == 0) {
+            // move OUTWARDS from the center
+            double angleAwayCenter = Math.atan2(awayCenter.y, awayCenter.x);
+            //System.out.println("Away center angle (rad) = " + angleAwayCenter);
+            double angleMin = angleAwayCenter - Math.PI / 2;
+            double angleMax = angleAwayCenter + Math.PI / 2;
+            //System.out.println("angleMin = " + angleMin + ", angleMax = " + angleMax);
+            double degMin = angleMin * Math.PI/180;
+            double degMax = angleMax * Math.PI/180;
+            //System.out.println("Min = " + degMin + ", max = " + degMax);
+            Vector<Double> neighborAngles = new Vector<Double>();
+            for (Cell c : nearby_cells) {
+                Point neighborPos = c.getPosition();
+                Point vectorToNeighbor = new Point(neighborPos.x - currPos.x, neighborPos.y - currPos.y);
+                double neighborAngle = Math.atan2(vectorToNeighbor.y, vectorToNeighbor.x);
+                if (neighborAngle >= angleMin && neighborAngle <= angleMax) {
+                    neighborAngles.add(neighborAngle);
+                }
+            }
+
+            neighborAngles.sort(null);
+            double maxArc = 0;
+            double prevAngle = angleMin;
+            double arcStart = angleMin;
+            double arcEnd = 0;
+            if (neighborAngles.size() > 0) {
+                for (double d : neighborAngles) {
+                    double arc = d - prevAngle;
+                    if (arc > maxArc) {
+                        maxArc = arc;
+                        arcStart = prevAngle;
+                        arcEnd = d;
+                    }
+                    prevAngle = d;
+                }
+                double arc = angleMax - neighborAngles.lastElement();
+                if (arc > maxArc) {
+                    maxArc = arc;
+                    arcStart = neighborAngles.lastElement();
+                    arcEnd = angleMax;
+                }
+            } // end neighborAngles.size() > 0
+            else {
+                maxArc = angleMax - angleMin;
+                arcStart = angleMin;
+                arcEnd = angleMax;
+            }
+            double angleMove = (arcStart + arcEnd) / 2;
+            double theta = angleMove;
+            double dx = Cell.move_dist * Math.cos(theta);
+            double dy = Cell.move_dist * Math.sin(theta);
+            nextVector = new Point(dx, dy);
+            int tries = 0;
+            while (collides(player_cell, nextVector, nearby_cells, nearby_pheromes)) {
+                if (tries == MAX_TRIES) {
+                    nextVector = new Point(0,0);
+                    break;
+                }
+                nextVector = new Point(nextVector.x * 0.9, nextVector.y * 0.9);
+                tries++;
+            }
+
+        } // end inOrOut == 0
+        else {
+            // move INWARDS toward center, less than 1
+            nextVector = new Point(toCenter.x * INWARD_MOVE_DIST, toCenter.y * INWARD_MOVE_DIST);
+            int tries = 0;
+            while(collides(player_cell, nextVector, nearby_cells, nearby_pheromes)) {
+                if (tries == MAX_TRIES) {
+                    nextVector = new Point(0,0);
+                    break;
+                }
+                nextVector = new Point(nextVector.x * 0.9, nextVector.y * 0.9);
+                tries++;
+            }
+        }
+        currCount = (currCount + 1) % effT;
+        System.out.println("new count: " + currCount);
+        byte countBits = (byte) ((currCount << 1) & 0b00011110);
+        nextMemory = (byte) (nextMemory & 0b11100001);
+        nextMemory = (byte) (nextMemory | countBits);
+        nextMove = new Move(nextVector, nextMemory);
+        return nextMove;
+    }
 
     // check if moving player_cell by vector collides with any nearby cell or hostile pherome
     private boolean collides(Cell player_cell, Point vector, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
