@@ -73,101 +73,8 @@ public class Player implements slather.sim.Player {
             return new Move(true, (byte) (memory | 0b10000000), (byte) memory);
          }
 
-
-        /*
-
-            Clustering ALgorithm - we are going to take a leaf out of group 1's
-            and start clustering after a certain point
-
-        */
          if (strategy == 1) {
-
-             // get the average vector for all cells, take the inverse of the vector
-             // and then use that to move a bit. add a little bit of aggressiveness
-             // if there are several cells nearby
-
-             int count = memory >> 4;
-
-             // begin spreading out
-
-             double vectx = 0.0;
-             double vecty = 0.0;
-             double vectfx = 0.0;
-             double vectfy = 0.0;
-             int fccnt = 0;
-             for (Cell nc : nearby_cells) {
-
-                 // get their positions
-                 Point ncp = nc.getPosition();
-                 Point pcp = player_cell.getPosition();
-
-                 // add some weights, and get distances
-                 double weight;
-                 double distx = Math.abs(ncp.x - pcp.x);
-                 double disty = Math.abs(ncp.y - pcp.y);
-                 double distance = player_cell.distance(nc);
-
-
-                 // use distance and type or set weights
-                 if (nc.player == player_cell.player) {
-                    weight = 0.3;
-                    double fdistx = Math.abs(ncp.x - pcp.x);
-                    double fdisty = Math.abs(ncp.y - pcp.y);
-                    vectfx = vectfx + ((ncp.x - pcp.x) * Math.pow(0.5, 2*fdisty));
-                    vectfy = vectfy + ((ncp.y - pcp.y) * Math.pow(0.5, 2*fdistx));
-                    fccnt++;
-                 } else {
-                     if (distance > 1.1)
-                        weight = -0.005;
-                    else
-                        weight = 0.1;
-                 }
-                 vectx = vectx + weight*(ncp.x - pcp.x);
-                 vecty = vecty + weight*(ncp.y - pcp.y);
-             }
-             double avg_x = vectx / Math.max(nearby_cells.size(), 1);
-             double avg_y = vecty / Math.max(nearby_cells.size(), 1);
-
-             double hyp = Math.sqrt(Math.pow(avg_x, 2.0) + Math.pow(avg_y, 2.0));
-             if (hyp > Cell.move_dist) {
-                 avg_x = avg_x * (Cell.move_dist / hyp);
-                 avg_y = avg_y * (Cell.move_dist / hyp);
-             }
-
-             fccnt = Math.max(fccnt, 1);
-             if (vectfx == 0) vectfx = 1;
-             if (vectfy == 0) vectfy = 1;
-             if (count == 3) {
-                 avg_x = avg_x - 0.5*(vectfy / (double)fccnt);
-                 avg_y = avg_y + 0.5*(vectfx / (double)fccnt);
-                 count = 7;
-             } else if (count == 7) {
-                 avg_x = avg_x + 0.5*(vectfy / (double)fccnt);
-                 avg_y = avg_y - 0.5*(vectfx / (double)fccnt);
-                 count = 3;
-             } else {
-                 count++;
-             }
-             Point nextPoint = new Point(-avg_x, -avg_y);
-             int count2 = 0;
-             int maxTries = 100;
-             if (collides(player_cell, nextPoint, nearby_cells, nearby_pheromes)) {
-                // if tried maximum # of times without success, just stay still
-                //nextPoint = new Point(0,0);
-            }
-
-
-             System.out.println("YOu are here");
-             memory = (byte)((memory & 0b10001111) + (count << 4));
-             memory = (byte)(memory | 0b10000000);
-             s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
-             System.out.println("Defender new Memory byte: " + s);
-
-             return new Move(nextPoint, memory);
-
-
-
-
+             return cluster(player_cell, memory, nearby_cells, nearby_pheromes);
          } else {
 
             /* Random walker strategy:
@@ -444,6 +351,89 @@ public class Player implements slather.sim.Player {
         return nextMove;
     }
 
+    private Move cluster(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
+        // get the average vector for all cells, take the inverse of the vector
+        // and then use that to move a bit. add a little bit of aggressiveness
+        // if there are several cells nearby
+        int count = memory >> 4;
+
+        // begin spreading out
+
+        double vectx = 0.0;
+        double vecty = 0.0;
+        double vectfx = 0.0;
+        double vectfy = 0.0;
+        int fccnt = 0;
+        for (Cell nc : nearby_cells) {
+
+            // get their positions
+            Point ncp = nc.getPosition();
+            Point pcp = player_cell.getPosition();
+
+            // add some weights, and get distances
+            double weight;
+            double distx = Math.abs(ncp.x - pcp.x);
+            double disty = Math.abs(ncp.y - pcp.y);
+            double distance = player_cell.distance(nc);
+
+
+            // use distance and type or set weights
+            if (nc.player == player_cell.player) {
+                weight = 0.3;
+                double fdistx = Math.abs(ncp.x - pcp.x);
+                double fdisty = Math.abs(ncp.y - pcp.y);
+                vectfx = vectfx + ((ncp.x - pcp.x) * Math.pow(0.5, 2*fdisty));
+                vectfy = vectfy + ((ncp.y - pcp.y) * Math.pow(0.5, 2*fdistx));
+                fccnt++;
+            } else {
+                if (distance > 1.1)
+                    weight = -0.005;
+                else
+                    weight = 0.1;
+            }
+            vectx = vectx + weight*(ncp.x - pcp.x);
+            vecty = vecty + weight*(ncp.y - pcp.y);
+        }
+        double avg_x = vectx / Math.max(nearby_cells.size(), 1);
+        double avg_y = vecty / Math.max(nearby_cells.size(), 1);
+
+        double hyp = Math.sqrt(Math.pow(avg_x, 2.0) + Math.pow(avg_y, 2.0));
+        if (hyp > Cell.move_dist) {
+            avg_x = avg_x * (Cell.move_dist / hyp);
+            avg_y = avg_y * (Cell.move_dist / hyp);
+        }
+
+        fccnt = Math.max(fccnt, 1);
+        if (vectfx == 0) vectfx = 1;
+        if (vectfy == 0) vectfy = 1;
+        if (count == 3) {
+            avg_x = avg_x - 0.5*(vectfy / (double)fccnt);
+            avg_y = avg_y + 0.5*(vectfx / (double)fccnt);
+            count = 7;
+        } else if (count == 7) {
+            avg_x = avg_x + 0.5*(vectfy / (double)fccnt);
+            avg_y = avg_y - 0.5*(vectfx / (double)fccnt);
+            count = 3;
+        } else {
+            count++;
+        }
+        Point nextPoint = new Point(-avg_x, -avg_y);
+
+        // if collides, try reducing the vector MAX_TRIES times
+        int count2 = 0;
+        while (collides(player_cell, nextPoint, nearby_cells, nearby_pheromes)) {
+            if (count2 == MAX_TRIES) {
+                nextPoint = new Point(0,0);
+                break;
+            }
+            nextPoint = new Point(nextPoint.x * 0.9, nextPoint.y * 0.9);
+            count2++;
+        }
+
+        return new Move(nextPoint, memory);
+
+    }
+    
     // check if moving player_cell by vector collides with any nearby cell or hostile pherome
     private boolean collides(Cell player_cell, Point vector, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
 	Iterator<Cell> cell_it = nearby_cells.iterator();
