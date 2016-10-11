@@ -17,7 +17,9 @@ public class Player implements slather.sim.Player {
     private static final int MAX_SHAPE_MEM = 4;   // CONSTANTS - maximum shape size (in bits)
     private static final int MIN_SHAPE_MEM = 2;   // CONSTANTS - minimum shape size (in bits)
     private static final int DURATION_CAP = 4;   // CONSTANTS - cap on traveling
-    private static final int AVOID_DIST = 5; // CONSTANTS - for random walker: turn away from friendlies that are in this radius
+    private static final int AVOID_DIST = 4;     // CONSTANTS - for random walker: avoid cells within this radius
+    private static final int PH_AVOID_DIST = 2;  // CONSTANTS - avoid pheromes within this radius 
+    private static final int FRIENDLY_AVOID_DIST = 5; // CONSTANTS - for random walker: turn away from friendlies that are in this radius
     private static final double MAX_MOVEMENT = 1; // CONSTANTS - maximum movement rate (assumed to be 1mm?)
     private static final int MAX_SIGHT_TRIGGER = 3; // CONSTANTS - radius beyond which we dont care about cells to look for widest angle
     private static final int MAX_TRIES = 30; // CONSTANT - max tries to reduce vector
@@ -185,10 +187,16 @@ public class Player implements slather.sim.Player {
             // get all nearby cell position vectors
             while (cell_it.hasNext()) {
                 Cell curr = cell_it.next();
-                if (player_cell.distance(curr) > AVOID_DIST) // don't worry about far away cells
+                if (curr.player == player_cell.player) {
+                    if (player_cell.distance(curr) > FRIENDLY_AVOID_DIST) // ignore far friendly cells
+                        continue;
+                }
+                else if (player_cell.distance(curr) > AVOID_DIST) // don't worry about far away cells
                     continue;
                 Point currPos = curr.getPosition();
-                neighbors.add(new Point(currPos.x - currentPosition.x, currPos.y - currentPosition.y));
+                double currRad = curr.getDiameter() / 2;
+                Point[] vectors = getTangentVectors(currentPosition, currPos, currRad);
+                neighbors.addAll(Arrays.asList(vectors));
             }
             // do pheromes too why not
             Iterator<Pherome> ph_it = nearby_pheromes.iterator();
@@ -196,13 +204,13 @@ public class Player implements slather.sim.Player {
                 Pherome curr = ph_it.next();
                 if (curr.player == player_cell.player)
                     continue;
-                if (player_cell.distance(curr) > AVOID_DIST)
+                if (player_cell.distance(curr) > PH_AVOID_DIST)
                     continue;
                 Point currPos = curr.getPosition();
                 neighbors.add(new Point(currPos.x - currentPosition.x, currPos.y - currentPosition.y));
             }
 
-            if (neighbors.size() < 1) { // case: no cells or only one cell to move away from
+            if (neighbors.size() < 1) { // case: no cells
                 // if had a previous direction, keep going in that direction
                 if (prevAngle > 0) {
                     Point vector = extractVectorFromAngle( (int)prevAngle);
@@ -218,11 +226,23 @@ public class Player implements slather.sim.Player {
                     byte newMemory = (byte) (newAngle & 0b00001111);
                     nextMove = new Move(newVector, newMemory);
                 }
+            } else if (neighbors.size() == 1) { // case: if only one thing nearby
+                // just move in the opposite direction
+                Point other = neighbors.get(0);
+                double magnitude = getMagnitude(currentPosition.x - other.x, currentPosition.y - other.y);
+                double newX = Cell.move_dist * (currentPosition.x - other.x) / magnitude;
+                double newY = Cell.move_dist * (currentPosition.y - other.y) / magnitude;
+                
+                Point newVector = new Point(newX, newY);
+                int newAngle = (int) (getPositiveAngle(Math.toDegrees(getAngleFromVector(newVector)), "d") / 30);
+                byte newMemory = (byte) (newAngle & 0b00001111);
+                nextMove = new Move(newVector, newMemory);
+
             } else { // case: cells too close, move in direction of the widest angle
                 neighbors.sort(new Comparator<Point>() {
                     public int compare(Point v1, Point v2) {
-                        double a1 = getAngleFromVector(v1);
-                        double a2 = getAngleFromVector(v2);
+                        double a1 = getPositiveAngle(Math.toDegrees(getAngleFromVector(v1)), "d");
+                        double a2 = getPositiveAngle(Math.toDegrees(getAngleFromVector(v2)), "d");
 
                         if (a1 == a2) return 0;
                         else if (a1 < a2) return -1;
@@ -233,10 +253,15 @@ public class Player implements slather.sim.Player {
                 // find widest angle
                 double lowerAngle = prevAngle; // smaller angle that borders the widest angle
                 double widestAngle = 0;
-                for (int i = 1; i < neighbors.size(); i++) {
-                    double a1 = getAngleFromVector(neighbors.get(i-1));
-                    double a2 = getAngleFromVector(neighbors.get(i));
-                    double deltAngle = a2 - a1;
+                for (int i = 0; i < neighbors.size(); i++) {
+                    double a1;
+                    if (i == 0) {
+                        a1 = getAngleFromVector(neighbors.get(neighbors.size()-1));
+                    } else {
+                        a1 = getPositiveAngle(getAngleFromVector(neighbors.get(i-1)), "r");
+                    }
+                    double a2 = getPositiveAngle(getAngleFromVector(neighbors.get(i)), "r");
+                    double deltAngle = Math.abs(a2 - a1);
                     if (deltAngle > widestAngle) {
                         widestAngle = deltAngle;
                         lowerAngle = a1;
@@ -283,7 +308,7 @@ public class Player implements slather.sim.Player {
                 */
 
                 // replace the previous vector bits with new direction
-                int newAngle = (int) (Math.toDegrees(destAngle) / 30);
+                int newAngle = (int) (getPositiveAngle(Math.toDegrees(destAngle), "d") / 30);
                 Point newVector = new Point(destX, destY);
                 byte newMemory = (byte) (newAngle & 0b00001111);
                 nextMove = new Move(newVector, newMemory);
@@ -449,9 +474,53 @@ public class Player implements slather.sim.Player {
 	return new Point(dx, dy);
     }
 
+    /*
+     * Returns an angle in radians.
+     */
     private double getAngleFromVector(Point vector) {
         return Math.atan2(vector.y, vector.x);
     }
+
+    /*
+     * Get magnitude of a vector given x,y.
+     */
+    private double getMagnitude(double x, double y) {
+        return Math.sqrt(x * x + y * y);
+    }
+
+    /*
+     * Get the positive version of the angle.
+     */
+    private double getPositiveAngle(double angle, String unit) {
+        double adj = 0;
+        if (unit == "d")
+            adj = 360;
+        else
+            adj = 2 * Math.PI;
+        return (angle > 0 ? angle : angle + adj);
+    }
+
+
+    /*
+     * Get the tangent vectors to the other cell.
+     */
+    private Point[] getTangentVectors(Point self, Point other, double radius) {
+        Point hypot = new Point(other.x - self.x, other.y - self.y);
+        // find the angle to center and add/subtract the angle to the tangent
+        double mainAngle = getAngleFromVector(hypot);
+        double deltAngle = Math.asin(radius / getMagnitude(hypot.x, hypot.y));
+        // magnitude of tangent vectors
+        double magnitude = getMagnitude(hypot.x, hypot.y) * Math.cos(deltAngle);
+
+        Point upperVector = new Point(magnitude * Math.cos(mainAngle + deltAngle),
+                                      magnitude * Math.sin(mainAngle + deltAngle));
+        Point lowerVector = new Point(magnitude * Math.cos(mainAngle - deltAngle),
+                                      magnitude * Math.sin(mainAngle - deltAngle));
+
+        return new Point[] {lowerVector, upperVector};
+    }
+       
+
 
     /* Gets vector based on direction (which side of the shape cell will move to)
      */
