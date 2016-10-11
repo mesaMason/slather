@@ -74,10 +74,6 @@ public class Player implements slather.sim.Player {
          }
 
 
-         if (true) {
-             return explode(player_cell, memory, nearby_cells, nearby_pheromes);
-         }
-         
         /*
 
             Clustering ALgorithm - we are going to take a leaf out of group 1's
