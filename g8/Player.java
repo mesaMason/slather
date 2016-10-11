@@ -27,7 +27,7 @@ public class Player implements slather.sim.Player {
     private static final double MAX_MOVEMENT = 1; // CONSTANTS - maximum movement rate (assumed to be 1mm?)
     private static final int MAX_SIGHT_TRIGGER = 3; // CONSTANTS - radius beyond which we dont care about cells to look for widest angle
     private static final int MAX_TRIES = 30; // CONSTANT - max tries to reduce vector
-    private static final double INWARD_MOVE_DIST = 0.95; // CONSTANT - amount to move inwards to the center
+    private static final double INWARD_MOVE_DIST = 0.9; // CONSTANT - amount to move inwards to the center
     private static final int EXPLODE_MAX_DIST = 16; // CONSTANT - max counter for explode strategy
     private static final int COUNTDOWN_TO_EXPLODE = 3; // CONSTANT - num generations of clustering before they all explode
     private int SHAPE_MEM_USAGE; // CONSTANTS - calculate this based on t
@@ -76,17 +76,27 @@ public class Player implements slather.sim.Player {
         */
 
         if (strategy == 0) {
-            return moveToCenter(player_cell, memory, nearby_cells, nearby_pheromes);
+            nextMove = moveToCenter(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 1) {
-            return scout(player_cell, memory, nearby_cells, nearby_pheromes);
+            nextMove = scout(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 2) {
-            return cluster(player_cell, memory, nearby_cells, nearby_pheromes);
+            nextMove = cluster(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 3) {
-            return explode(player_cell, memory, nearby_cells, nearby_pheromes);
+            nextMove = explode(player_cell, memory, nearby_cells, nearby_pheromes);
+            Point nextVector = nextMove.vector;
+            boolean nextReproduce = nextMove.reproduce;
+            byte nextMemory = nextMove.memory;
+            byte inOrOut = (byte) (memory & 0b00000001);
+            // if on OUTWARD movement, if cant move, revert to scout
+            if (!nextReproduce && nextVector.x == 0 && nextVector.y == 0 && inOrOut == 0) {
+                memory = (byte) 0b01000000;
+                nextMove = scout(player_cell, memory, nearby_cells, nearby_pheromes);
+            }
         } else {
-            return new Move(new Point(0,0), memory);
+            nextMove =new Move(new Point(0,0), memory);
         }
 
+        return nextMove;
     }
 
 
