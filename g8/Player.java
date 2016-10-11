@@ -29,6 +29,7 @@ public class Player implements slather.sim.Player {
     private static final int MAX_TRIES = 30; // CONSTANT - max tries to reduce vector
     private static final double INWARD_MOVE_DIST = 0.95; // CONSTANT - amount to move inwards to the center
     private static final int EXPLODE_MAX_DIST = 16; // CONSTANT - max counter for explode strategy
+    private static final int COUNTDOWN_TO_EXPLODE = 3; // CONSTANT - num generations of clustering before they all explode
     private int SHAPE_MEM_USAGE; // CONSTANTS - calculate this based on t
     private int EFFECTIVE_SHAPE_SIZE; // CONSTANTS - actual number of sides to our shape
 
@@ -53,22 +54,8 @@ public class Player implements slather.sim.Player {
 
     /*
       Memory byte setup:
-      1 bit strategy (currently either square walker or random walker)
-
-      Memory byte for square walker:
-      1 bit strategy
-      3 bits empty for now
-      0-4 bits shape
-
-      Memory byte for random walker:
-      1 bit strategy
-      7 bits previous direction
-
-      Directions:
-      0 = North
-      1 = East
-      2 = South
-      3 = West
+      2 bits strategy
+      6 bits for strategy's use
      */
      public Move play(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
 
@@ -107,7 +94,7 @@ public class Player implements slather.sim.Player {
 
         if (player_cell.getDiameter() >= 2) {
            memory = (byte)(memory & 0b11001111);
-           return new Move(true, (byte) (memory | 0b01000000), (byte) (memory | 0b10000000));
+           return new Move(true, (byte) (memory | 0b10000000), (byte) (memory | 0b10000000));
         }
 
 
@@ -333,9 +320,30 @@ public class Player implements slather.sim.Player {
 
 
 
-
-
+    /*
+      Memory:
+      4 bits strategy
+      2 bits count
+      4 bits generation count
+     */
     private Move cluster(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
+        // if can reproduce, do so and increment the generation
+        if (player_cell.getDiameter() >= 2) {
+            int generation = memory & 0b00001111;
+            generation++;
+
+            if (generation == COUNTDOWN_TO_EXPLODE) {
+                memory = (byte) 0b11000000;
+                return new Move(true, memory, memory);
+            }
+            else {
+                memory = (byte) (memory & 0b11110000); // clear old generation bits
+                memory = (byte) (memory | generation); // set current generation bits
+                return new Move(true, memory, memory);
+            }
+        }
+        
+
         // get the average vector for all cells, take the inverse of the vector
         // and then use that to move a bit. add a little bit of aggressiveness
         // if there are several cells nearby
@@ -418,12 +426,21 @@ public class Player implements slather.sim.Player {
     }
 
     private Move explode(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
-        String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
         Point currPos = player_cell.getPosition();
         Point nextVector = null;
         byte nextMemory = memory;
         Move nextMove = null;
-        Point toCenter = new Point(1,0); // TODO: find vector to center
+
+        // get the difference vector from the center, and the distance
+        double diffx = (double)(centerX - currPos.x);
+        double diffy = (double)(centerY - currPos.y);
+        double dist = player_cell.getPosition().distance(new Point(centerX, centerY));
+
+        // normalize the vector to 1 mm
+        diffx = diffx / dist;
+        diffy = diffy / dist;
+
+        Point toCenter = new Point(diffx, diffy);
         Point awayCenter = new Point(-toCenter.x, -toCenter.y);
         byte inOrOut = (byte) (memory & 0b00000001);
         int currCount = (memory >> 1) & 0b00001111;
@@ -432,6 +449,16 @@ public class Player implements slather.sim.Player {
             nextMemory = (byte) (memory ^ 0b00000001);
             inOrOut = (byte) (nextMemory & 0b00000001);
         }
+
+        // reproduce if possible, increment the count
+        if (player_cell.getDiameter() >= 2) {
+            currCount = (currCount + 1) % effT;
+            byte countBits = (byte) ((currCount << 1) & 0b00011110);
+            nextMemory = (byte) (nextMemory & 0b11100001);
+            nextMemory = (byte) (nextMemory | countBits);
+            return new Move(true, memory, memory);
+        }
+
         if (inOrOut == 0) {
             // move OUTWARDS from the center
             double angleAwayCenter = Math.atan2(awayCenter.y, awayCenter.x);
@@ -640,7 +667,7 @@ public class Player implements slather.sim.Player {
     }
 
     private int getStrategy(byte memory) {
-        int strategy = (memory >> 7) & 1;
+        int strategy = (memory >> 6) & 0b11;
         return strategy;
     }
 
