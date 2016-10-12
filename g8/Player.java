@@ -27,13 +27,13 @@ public class Player implements slather.sim.Player {
     private static final double MAX_MOVEMENT = 1; // CONSTANTS - maximum movement rate (assumed to be 1mm?)
     private static final int MAX_SIGHT_TRIGGER = 3; // CONSTANTS - radius beyond which we dont care about cells to look for widest angle
     private static final int MAX_TRIES = 30; // CONSTANT - max tries to reduce vector
-    private static final double INWARD_MOVE_DIST = 0.9; // CONSTANT - amount to move inwards to the center
+    private static final double INWARD_MOVE_DIST = 0.95; // CONSTANT - amount to move inwards to the center
     private static final int EXPLODE_MAX_DIST = 16; // CONSTANT - max counter for explode strategy
     private static final int COUNTDOWN_TO_EXPLODE = 3; // CONSTANT - num generations of clustering before they all explode
+    private static final int EXPLODE_AVOID = 2; // CONSTANT - explode only looks in this radius to avoid cells
+    private static final double NEXT_REDUCE_MOVE = 0.7; // CONSTANT - factor to reduce movement if collision happens
     private int SHAPE_MEM_USAGE; // CONSTANTS - calculate this based on t
     private int EFFECTIVE_SHAPE_SIZE; // CONSTANTS - actual number of sides to our shape
-
-
 
     public void init(double d, int t, int sideLength) {
         gen = new Random();
@@ -58,28 +58,28 @@ public class Player implements slather.sim.Player {
       6 bits for strategy's use
      */
      public Move play(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
-
          Point currentPosition  = player_cell.getPosition();
          int strategy = getStrategy(memory);
          Move nextMove = null;
          String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
-         System.out.println("Memory byte: " + s);
+         //System.out.println("Memory byte: " + s);
 
         /*
-
             Set multiple strategies
             1) first is to move to the center and create a cluster bomb there
             2) the second strategy people would start moving around becoming explorers
             3) the third strategy people would create cluster
             4) 4th would be end game strategy
-
         */
 
         if (strategy == 0) {
+            //System.out.println("MOVE TO CENTER");
             nextMove = moveToCenter(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 1) {
+            //System.out.println("SCOUT");
             nextMove = scout(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 2) {
+            //System.out.println("CLUSTER");
             nextMove = cluster(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 3) {
             nextMove = explode(player_cell, memory, nearby_cells, nearby_pheromes);
@@ -89,13 +89,14 @@ public class Player implements slather.sim.Player {
             byte inOrOut = (byte) (memory & 0b00000001);
             // if on OUTWARD movement, if cant move, revert to scout
             if (!nextReproduce && nextVector.x == 0 && nextVector.y == 0 && inOrOut == 0) {
-                memory = (byte) 0b01000000;
+                System.out.println("REVERT TO SCOUT");
+                memory = (byte) 0b01000001;
                 nextMove = scout(player_cell, memory, nearby_cells, nearby_pheromes);
+                byte newMemory = nextMove.memory;
             }
         } else {
-            nextMove =new Move(new Point(0,0), memory);
+            nextMove = new Move(new Point(0,0), memory);
         }
-
         return nextMove;
     }
 
@@ -106,8 +107,6 @@ public class Player implements slather.sim.Player {
            memory = (byte)(memory & 0b11001111);
            return new Move(true, (byte) (memory | 0b10000000), (byte) (memory | 0b10000000));
         }
-
-
 
         // Get the player's position
         double pcx = player_cell.getPosition().x;
@@ -158,17 +157,20 @@ public class Player implements slather.sim.Player {
         return nextMove;
     }
 
-
-
-
-
-
+    /* Random walker strategy:
+       Uses "widest angle" strategy inspired by g5 (& others?)
+       Move away from cells that are too close (specified by AVOID_DIST)
+       If no closeby friendly cells to avoid, act like default player (move in straight lines)
+       Memory byte:
+        - 2 bits strategy
+        - 2 bits unused
+        - 4 bits previous angle (must be > 0)
+    */
     private Move scout(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
-        /* Random walker strategy:
-           Uses "widest angle" strategy inspired by g5 (& others?)
-           Move away from cells that are too close (specified by AVOID_DIST)
-           If no closeby friendly cells to avoid, act like default player (move in straight lines)
-         */
+        if (player_cell.getDiameter() >= 2) {
+           return new Move(true, memory, memory);
+        }
+        
         int prevAngle = memory & 0b00001111;
         Point currentPosition = player_cell.getPosition();
         Move nextMove = null;
@@ -215,7 +217,9 @@ public class Player implements slather.sim.Player {
             if (nextMove == null) {
                 int newAngle = gen.nextInt(12);
                 Point newVector = extractVectorFromAngle(newAngle);
-                byte newMemory = (byte) (newAngle & 0b00001111);
+                byte angleBits = (byte) (newAngle & 0b00001111);
+                byte newMemory = (byte) (memory & 0b11110000);
+                newMemory = (byte) (newMemory | angleBits);
                 nextMove = new Move(newVector, newMemory);
             }
         } else if (neighbors.size() == 1) { // case: if only one thing nearby
@@ -227,7 +231,10 @@ public class Player implements slather.sim.Player {
 
             Point newVector = new Point(newX, newY);
             int newAngle = (int) (getPositiveAngle(Math.toDegrees(getAngleFromVector(newVector)), "d") / 30);
-            byte newMemory = (byte) (newAngle & 0b00001111);
+
+            byte angleBits = (byte) (newAngle & 0b00001111);
+            byte newMemory = (byte) (memory & 0b11110000);
+            newMemory = (byte) (newMemory | angleBits);
             nextMove = new Move(newVector, newMemory);
 
         } else { // case: cells too close, move in direction of the widest angle
@@ -261,7 +268,7 @@ public class Player implements slather.sim.Player {
             }
 
             // calculate direction to go (aim for the "middle" of the widest angle)
-            double destAngle = lowerAngle + widestAngle / 2;
+            double destAngle = (lowerAngle + widestAngle) / 2;
 
             double destX = Cell.move_dist * Math.cos(destAngle);
             double destY = Cell.move_dist * Math.sin(destAngle);
@@ -302,7 +309,9 @@ public class Player implements slather.sim.Player {
             // replace the previous vector bits with new direction
             int newAngle = (int) (getPositiveAngle(Math.toDegrees(destAngle), "d") / 30);
             Point newVector = new Point(destX, destY);
-            byte newMemory = (byte) (newAngle & 0b00001111);
+            byte angleBits = (byte) (newAngle & 0b00001111);
+            byte newMemory = (byte) (memory & 0b11110000);
+            newMemory = (byte) (newMemory | angleBits);
             nextMove = new Move(newVector, newMemory);
         }
 
@@ -315,7 +324,9 @@ public class Player implements slather.sim.Player {
             for (int i = 0; i < 20; i++) {
                 Point newVector = extractVectorFromAngle(arg);
                 if (!collides(player_cell, newVector, nearby_cells, nearby_pheromes)) {
-                    byte newMemory = (byte) (arg & 0b00001111);
+                    byte angleBits = (byte) (arg & 0b00001111);
+                    byte newMemory = (byte) (memory & 0b11110000);
+                    newMemory = (byte) (newMemory | angleBits);
                     nextMove = new Move(newVector, newMemory);
                     break;
                 }
@@ -378,6 +389,9 @@ public class Player implements slather.sim.Player {
             double disty = Math.abs(ncp.y - pcp.y);
             double distance = player_cell.distance(nc);
 
+            if (distance >= AVOID_DIST) {
+                continue;
+            }
 
             // use distance and type or set weights
             if (nc.player == player_cell.player) {
@@ -428,7 +442,7 @@ public class Player implements slather.sim.Player {
                 nextPoint = new Point(0,0);
                 break;
             }
-            nextPoint = new Point(nextPoint.x * 0.9, nextPoint.y * 0.9);
+            nextPoint = new Point(nextPoint.x * NEXT_REDUCE_MOVE, nextPoint.y * NEXT_REDUCE_MOVE);
             count2++;
         }
 
@@ -472,54 +486,74 @@ public class Player implements slather.sim.Player {
         if (inOrOut == 0) {
             // move OUTWARDS from the center
             double angleAwayCenter = Math.atan2(awayCenter.y, awayCenter.x);
-            //System.out.println("Away center angle (rad) = " + angleAwayCenter);
-            double angleMin = angleAwayCenter - Math.PI / 2;
-            double angleMax = angleAwayCenter + Math.PI / 2;
-            //System.out.println("angleMin = " + angleMin + ", angleMax = " + angleMax);
-            double degMin = angleMin * Math.PI/180;
-            double degMax = angleMax * Math.PI/180;
-            //System.out.println("Min = " + degMin + ", max = " + degMax);
+            double degAwayCenter = Math.toDegrees(angleAwayCenter);
+            degAwayCenter = (360 + degAwayCenter % 360) % 360;
+            double degMin = (360 + (degAwayCenter - 120) % 360) % 360; // normalize
+            double degMax = (360 + (degAwayCenter + 120) % 360) % 360; // normalize
+
             Vector<Double> neighborAngles = new Vector<Double>();
-            for (Cell c : nearby_cells) {
+            Iterator<Cell> cell_it = nearby_cells.iterator();
+            while (cell_it.hasNext()) {
+                Cell c = cell_it.next();
                 Point neighborPos = c.getPosition();
+                if (currPos.distance(neighborPos) >= EXPLODE_AVOID) {
+                    continue;
+                }
                 Point vectorToNeighbor = new Point(neighborPos.x - currPos.x, neighborPos.y - currPos.y);
                 double neighborAngle = Math.atan2(vectorToNeighbor.y, vectorToNeighbor.x);
-                if (neighborAngle >= angleMin && neighborAngle <= angleMax) {
-                    neighborAngles.add(neighborAngle);
+                double neighborDeg = Math.toDegrees(neighborAngle);
+                neighborDeg = (360 + neighborDeg % 360) % 360;
+                if (degMin < degMax) {
+                    if (neighborDeg >= degMin && neighborDeg <= degMax) {
+                        neighborAngles.add(neighborDeg);
+                    }
+                }
+                else {
+                    if (neighborDeg >= degMin || neighborDeg <= degMax) {
+                        neighborAngles.add(neighborDeg);
+                    }
                 }
             }
 
-            neighborAngles.sort(null);
-            double maxArc = 0;
-            double prevAngle = angleMin;
-            double arcStart = angleMin;
-            double arcEnd = 0;
-            if (neighborAngles.size() > 0) {
-                for (double d : neighborAngles) {
-                    double arc = d - prevAngle;
-                    if (arc > maxArc) {
-                        maxArc = arc;
-                        arcStart = prevAngle;
-                        arcEnd = d;
+            neighborAngles.add(degMax);
+            neighborAngles.sort(new Comparator<Double>() {
+                    // sorts the angles in order of closest to min angle to max angle
+                    public int compare(Double d1, Double d2) {
+                        double a = (360 + (d1-degMin) % 360) % 360;
+                        double b = (360 + (d2-degMin) % 360) % 360;
+                        if (a == b) return 0;
+                        else if (a < b) return -1;
+                        else return 1;
                     }
-                    prevAngle = d;
-                }
-                double arc = angleMax - neighborAngles.lastElement();
+                });
+            double maxArc = 0;
+            double prevAngle = degMin;
+            double arcStart = degMin;
+            double arcEnd = 0;
+            for (double d : neighborAngles) {
+                double arc = Math.abs(d - prevAngle) % 360;
                 if (arc > maxArc) {
                     maxArc = arc;
-                    arcStart = neighborAngles.lastElement();
-                    arcEnd = angleMax;
+                    arcStart = prevAngle;
+                    arcEnd = d;
                 }
-            } // end neighborAngles.size() > 0
-            else {
-                maxArc = angleMax - angleMin;
-                arcStart = angleMin;
-                arcEnd = angleMax;
+                prevAngle = d;
             }
-            double angleMove = (arcStart + arcEnd) / 2;
-            double theta = angleMove;
+            double angleMove = ((arcStart + arcEnd) / 2) + 180;
+            if (arcStart <= arcEnd) {
+                angleMove = (arcStart + arcEnd) / 2;
+            }
+            else {
+                angleMove = ((arcStart + arcEnd) / 2) + 180;
+            }
+            double theta = Math.toRadians(angleMove);
             double dx = Cell.move_dist * Math.cos(theta);
             double dy = Cell.move_dist * Math.sin(theta);
+            System.out.println("Deg away from center: " + degAwayCenter);
+            System.out.println("Neighbor angles: " + neighborAngles.toString());
+            System.out.println("largest arc: " + maxArc + ", (" + arcStart + ", " + arcEnd);
+            System.out.println("Move to: " + angleMove%360);
+
             nextVector = new Point(dx, dy);
             int tries = 0;
             while (collides(player_cell, nextVector, nearby_cells, nearby_pheromes)) {
@@ -527,7 +561,7 @@ public class Player implements slather.sim.Player {
                     nextVector = new Point(0,0);
                     break;
                 }
-                nextVector = new Point(nextVector.x * 0.9, nextVector.y * 0.9);
+                nextVector = new Point(nextVector.x * NEXT_REDUCE_MOVE, nextVector.y * NEXT_REDUCE_MOVE);
                 tries++;
             }
 
@@ -541,16 +575,20 @@ public class Player implements slather.sim.Player {
                     nextVector = new Point(0,0);
                     break;
                 }
-                nextVector = new Point(nextVector.x * 0.9, nextVector.y * 0.9);
+                nextVector = new Point(nextVector.x * NEXT_REDUCE_MOVE, nextVector.y * NEXT_REDUCE_MOVE);
                 tries++;
             }
         }
         currCount = (currCount + 1) % effT;
-        System.out.println("new count: " + currCount);
         byte countBits = (byte) ((currCount << 1) & 0b00011110);
         nextMemory = (byte) (nextMemory & 0b11100001);
         nextMemory = (byte) (nextMemory | countBits);
         nextMove = new Move(nextVector, nextMemory);
+        int strat = getStrategy(nextMemory);
+        String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
+        if (strat != 3) {
+            System.out.println("New memory set to: " + s);
+        }
         return nextMove;
     }
 
