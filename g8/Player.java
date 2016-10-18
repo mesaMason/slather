@@ -20,6 +20,12 @@ public class Player implements slather.sim.Player {
     private static final int BORDER = 2;
     private static final int TCELL = 3;
 
+    private static int AVOID_DIST = 2;
+    private static int FRIENDLY_AVOID_DIST = 4;
+    private static double NEXT_REDUCE_MOVE = 0.7;
+    private static int MAX_TRIES = 10;
+    private static int PH_AVOID_DIST = 2;
+
     // constants for sync strategy
     private static final int SYNC_MAX_DIR_COUNT = 12;
     private static final int SYNC_LOOK_ARC = 120; // constrained arc to look for the next move
@@ -43,14 +49,6 @@ public class Player implements slather.sim.Player {
          String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
          //System.out.println("Memory byte: " + s);
 
-        /*
-            Set multiple strategies
-            1) first is to move to the center and create a cluster bomb there
-            2) the second strategy people would start moving around becoming explorers
-            3) the third strategy people would create cluster
-            4) 4th would be end game strategy
-        */
-
         if (strategy == 0) {
             //System.out.println("MOVE TO CENTER");
             nextMove = cluster(player_cell, memory, nearby_cells, nearby_pheromes);
@@ -69,17 +67,6 @@ public class Player implements slather.sim.Player {
     }
 
 
-
-
-    /* Random walker strategy:
-       Uses "widest angle" strategy inspired by g5 (& others?)
-       Move away from cells that are too close (specified by AVOID_DIST)
-       If no closeby friendly cells to avoid, act like default player (move in straight lines)
-       Memory byte:
-        - 2 bits strategy
-        - 2 bits unused
-        - 4 bits previous angle (must be > 0)
-    */
     private Move scout(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
         if (player_cell.getDiameter() >= 2) {
            return new Move(true, memory, memory);
@@ -187,39 +174,6 @@ public class Player implements slather.sim.Player {
             double destX = Cell.move_dist * Math.cos(destAngle);
             double destY = Cell.move_dist * Math.sin(destAngle);
 
-            /* this is probably not necessary anymore?
-            // check if cells are in the direction we are moving toward
-            cell_it = nearby_cells.iterator();
-            while (cell_it.hasNext()) {
-                Cell curr = cell_it.next();
-                if (player_cell.distance(curr) > AVOID_DIST) // don't worry about far away cells
-                    continue;
-                Point currPos = curr.getPosition();
-                Point playerPos = player_cell.getPosition();
-                if (((currPos.x - playerPos.x) / (currPos.y - playerPos.y)) == (awayX / awayY)) {
-                    // try orthogonal vector if there are cells in the way
-                    boolean newOption = true;
-                    Iterator<Cell> test_cell_it = nearby_cells.iterator();
-                    while (test_cell_it.hasNext()) {
-                        Cell testCell = test_cell_it.next();
-                        if (player_cell.distance(testCell) > AVOID_DIST) // don't worry about far away cells
-                            continue;
-                        Point testPos = testCell.getPosition();
-                        if (((testPos.x + playerPos.y) / (testPos.y - playerPos.x)) == (-awayY / awayX)) {
-                            newOption = false;
-                            break;
-                        }
-                    }
-                    if (newOption) {
-                        double savedX = awayX;
-                        awayX = -awayY;
-                        awayY = savedX;
-                        break;
-                    }
-                }
-            }
-            */
-
             // replace the previous vector bits with new direction
             int newAngle = (int) (getPositiveAngle(Math.toDegrees(destAngle), "d") / 30);
             Point newVector = new Point(destX, destY);
@@ -264,18 +218,7 @@ public class Player implements slather.sim.Player {
     private Move cluster(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
         // if can reproduce, do so and increment the generation
         if (player_cell.getDiameter() >= 2) {
-            int generation = memory & 0b00001111;
-            generation++;
-
-            if (generation == COUNTDOWN_TO_EXPLODE) {
-                memory = (byte) 0b11000000;
-                return new Move(true, memory, memory);
-            }
-            else {
-                memory = (byte) (memory & 0b11110000); // clear old generation bits
-                memory = (byte) (memory | generation); // set current generation bits
-                return new Move(true, memory, memory);
-            }
+            return new Move(true, memory, memory);
         }
 
 
@@ -383,6 +326,13 @@ public class Player implements slather.sim.Player {
         
     }
 
+    private Move border(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
+        return new Move(new Point(0,0), memory);
+    }
+    private Move tcell(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
+        return new Move(new Point(0,0), memory);
+    }
+
     // check if moving player_cell by vector collides with any nearby cell or hostile pherome
     private boolean collides(Cell player_cell, Point vector, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
     	Iterator<Cell> cell_it = nearby_cells.iterator();
@@ -460,65 +410,5 @@ public class Player implements slather.sim.Player {
     private int getStrategy(byte memory) {
         int strategy = (memory >> 6) & 0b11;
         return strategy;
-    }
-
-    /* Estimate the last known direction of a cell given pheromes that can be seen
-       Returns as a vector (Point object)
-       Method: for given cell, find pherome of the same type that is <= MAX_MOVEMENT
-         If more than 1 pherome found, movement cannot be determined, return MAX_MOVEMENT+1,MAX_MOVEMENT+1
-         If no pheromes found and cell is at max view distance, movement cannot be determined (otherwise
-           it legitimately did not move!)
-     */
-    private Point getVector(Cell player_cell, Cell c, Set<Pherome> nearby_pheromes) {
-        Iterator<Pherome> pherome_it = nearby_pheromes.iterator();
-        double dX;
-        double dY;
-        int count = 0;
-        Pherome closest = null;
-        double cRadius = c.getDiameter()/2;
-        Point cPos = c.getPosition();
-
-        while (pherome_it.hasNext()) {
-            Pherome curr = pherome_it.next();
-            Point currPos = curr.getPosition();
-            if (curr.player != c.player || currPos == cPos)
-                continue;
-            double distance = c.distance(curr) + cRadius;
-            if (distance <= MAX_MOVEMENT) {
-                count++;
-                closest = curr;
-            }
-        }
-
-        if (count > 1) { // more than one close pherome, vector cannot be determined
-            dX = MAX_MOVEMENT + 1;
-            dY = MAX_MOVEMENT + 1;
-            System.out.println("Found too many pheromes: " + count);
-            return new Point(dX, dY);
-        }
-        else if (count == 0) { // no pheromes deteced closeby
-            double distanceCelltoCell = player_cell.distance(c);
-            if ( (distanceCelltoCell + player_cell.getDiameter()/2 + c.getDiameter()/2) >= d ) {
-                // other cell is at edge of view, cannot determine vector
-                dX = MAX_MOVEMENT + 1;
-                dY = MAX_MOVEMENT + 1;
-                return new Point(dX, dY);
-            } else {
-                // other cell well within view and no closeby pheromes, so it actually didn't move
-                return new Point(0, 0);
-            }
-        }
-        else if (count == 1) { // only 1 pherome detected, can get vector
-            Point cPosition = c.getPosition();
-            Point pPosition = closest.getPosition();
-            dX = cPosition.x - pPosition.x;
-            dY = cPosition.y - pPosition.y;
-            return new Point(dX, dY);
-        }
-        else {
-            dX = MAX_MOVEMENT + 1;
-            dY = MAX_MOVEMENT + 1;
-            return new Point(dX, dY);
-        }
     }
 }
