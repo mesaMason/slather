@@ -45,7 +45,7 @@ public class Player implements slather.sim.Player {
          String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
          //System.out.println("Memory byte: " + s);
 
-        if (strategy == 0) {
+/*        if (strategy == 0) {
             //System.out.println("MOVE TO CENTER");
             nextMove = cluster(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 1) {
@@ -58,7 +58,9 @@ public class Player implements slather.sim.Player {
             nextMove = tcell(player_cell, memory, nearby_cells, nearby_pheromes);
         } else {
             nextMove = new Move(new Point(0,0), memory);
-        }
+        } */
+
+        nextMove = scout(player_cell, memory, nearby_cells, nearby_pheromes);
         return nextMove;
     }
 
@@ -72,36 +74,9 @@ public class Player implements slather.sim.Player {
         Point currentPosition = player_cell.getPosition();
         Move nextMove = null;
 
-        List<Point> neighbors = new ArrayList<Point>();
-        Iterator<Cell> cell_it = nearby_cells.iterator();
+        double[] bounds = getWidestAngle(player_cell, nearby_cells, nearby_pheromes);
 
-        // get all nearby cell position vectors
-        while (cell_it.hasNext()) {
-            Cell curr = cell_it.next();
-            if (curr.player == player_cell.player) {
-                if (player_cell.distance(curr) > FRIENDLY_AVOID_DIST) // ignore far friendly cells
-                    continue;
-            }
-            else if (player_cell.distance(curr) > AVOID_DIST) // don't worry about far away cells
-                continue;
-            Point currPos = curr.getPosition();
-            double currRad = curr.getDiameter() / 2;
-            Point[] vectors = getTangentVectors(currentPosition, currPos, currRad);
-            neighbors.addAll(Arrays.asList(vectors));
-        }
-        // do pheromes too why not
-        Iterator<Pherome> ph_it = nearby_pheromes.iterator();
-        while (ph_it.hasNext()) {
-            Pherome curr = ph_it.next();
-            if (curr.player == player_cell.player)
-                continue;
-            if (player_cell.distance(curr) > PH_AVOID_DIST)
-                continue;
-            Point currPos = curr.getPosition();
-            neighbors.add(new Point(currPos.x - currentPosition.x, currPos.y - currentPosition.y));
-        }
-
-        if (neighbors.size() < 1) { // case: no cells
+        if (bounds == null) { // case: no cells
             // if had a previous direction, keep going in that direction
             if (prevAngle > 0) {
                 Point vector = extractVectorFromAngle( (int)prevAngle);
@@ -119,53 +94,15 @@ public class Player implements slather.sim.Player {
                 newMemory = (byte) (newMemory | angleBits);
                 nextMove = new Move(newVector, newMemory);
             }
-        } else if (neighbors.size() == 1) { // case: if only one thing nearby
-            // just move in the opposite direction
-            Point other = neighbors.get(0);
-            double magnitude = getMagnitude(currentPosition.x - other.x, currentPosition.y - other.y);
-            double newX = Cell.move_dist * (currentPosition.x - other.x) / magnitude;
-            double newY = Cell.move_dist * (currentPosition.y - other.y) / magnitude;
-
-            Point newVector = new Point(newX, newY);
-            int newAngle = (int) (getPositiveAngle(Math.toDegrees(getAngleFromVector(newVector)), "d") / 30);
-
-            byte angleBits = (byte) (newAngle & 0b00001111);
-            byte newMemory = (byte) (memory & 0b11110000);
-            newMemory = (byte) (newMemory | angleBits);
-            nextMove = new Move(newVector, newMemory);
-
-        } else { // case: cells too close, move in direction of the widest angle
-            neighbors.sort(new Comparator<Point>() {
-                public int compare(Point v1, Point v2) {
-                    double a1 = getPositiveAngle(Math.toDegrees(getAngleFromVector(v1)), "d");
-                    double a2 = getPositiveAngle(Math.toDegrees(getAngleFromVector(v2)), "d");
-
-                    if (a1 == a2) return 0;
-                    else if (a1 < a2) return -1;
-                    else return 1;
-                }
-            });
-
-            // find widest angle
-            double lowerAngle = prevAngle; // smaller angle that borders the widest angle
-            double widestAngle = 0;
-            for (int i = 0; i < neighbors.size(); i++) {
-                double a1;
-                if (i == 0) {
-                    a1 = getAngleFromVector(neighbors.get(neighbors.size()-1));
-                } else {
-                    a1 = getPositiveAngle(getAngleFromVector(neighbors.get(i-1)), "r");
-                }
-                double a2 = getPositiveAngle(getAngleFromVector(neighbors.get(i)), "r");
-                double deltAngle = Math.abs(a2 - a1);
-                if (deltAngle > widestAngle) {
-                    widestAngle = deltAngle;
-                    lowerAngle = a1;
-                }
+        } 
+        else { // case: there are cells
+            // calculate direction to go (aim for the "middle" of the widest angle)
+            double lowerAngle = bounds[0];
+            if (bounds[0] > bounds[1]) {
+                lowerAngle = getNegativeAngle(bounds[0], "d");
             }
 
-            // calculate direction to go (aim for the "middle" of the widest angle)
-            double destAngle = (lowerAngle + widestAngle) / 2;
+            double destAngle = lowerAngle + (bounds[1] - lowerAngle) / 2;
 
             double destX = Cell.move_dist * Math.cos(destAngle);
             double destY = Cell.move_dist * Math.sin(destAngle);
@@ -201,8 +138,6 @@ public class Player implements slather.sim.Player {
         } // end check candidate nextMove collision
         return nextMove;
     }
-
-
 
 
     /*
@@ -365,6 +300,18 @@ public class Player implements slather.sim.Player {
         return (angle > 0 ? angle : angle + adj);
     }
 
+    /*
+     * Get the negative version of the angle.
+     */
+    private double getNegativeAngle(double angle, String unit) {
+        double adj = 0;
+        if (unit == "d")
+            adj = 360;
+        else
+            adj = 2 * Math.PI;
+        return (angle > 0 ? angle : angle - adj);
+    }
+
 
     /*
      * Get the tangent vectors to the other cell.
@@ -390,5 +337,118 @@ public class Player implements slather.sim.Player {
     private int getStrategy(byte memory) {
         int strategy = (memory >> 6) & 0b11;
         return strategy;
+    }
+
+    /*
+     * Same as method below but sets a default [0,360] range.
+     */
+    private double[] getWidestAngle(Cell player_cell, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
+        return getWidestAngle(player_cell, nearby_cells, nearby_pheromes, new double[] {0.0,360.0});
+    }
+
+    /*
+     * Args:
+     *  bounds: [lower, upper] angle bounds that we're looking at
+     * Normalizes angles to a [0,360] range.
+     * Returns an array of doubles containing the lower and upper angles that border the widest angle
+     * e.g. if the widest angle is 30 degrees between 10 and 40 degrees,
+     *      we would return [10.0, 40.0]
+     */
+    private double[] getWidestAngle(Cell player_cell, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes, double[] bounds) {
+        boolean bounded = (bounds[1] - bounds[0] != 360);
+        double adjustment = (bounds[0] < bounds[1] ? bounds[0] : getNegativeAngle(bounds[0], "d"));
+        double lowerBound = 0;
+        double upperBound = bounds[1] - adjustment;
+
+        List<Point> neighbors = new ArrayList<Point>();
+        Iterator<Cell> cell_it = nearby_cells.iterator();
+        Point currentPosition = player_cell.getPosition();
+
+        // get all nearby cell position vectors
+        while (cell_it.hasNext()) {
+            Cell curr = cell_it.next();
+            if (curr.player == player_cell.player) {
+                if (player_cell.distance(curr) > FRIENDLY_AVOID_DIST) // ignore far friendly cells
+                    continue;
+            }
+            else if (player_cell.distance(curr) > AVOID_DIST) // don't worry about far away cells
+                continue;
+
+            Point currPos = curr.getPosition();
+            double currRad = curr.getDiameter() / 2;
+            Point[] vectors = getTangentVectors(currentPosition, currPos, currRad);
+
+            for (Point v : vectors) {
+                double adjustedAngle = (getPositiveAngle(Math.toDegrees(getAngleFromVector(v)), "d") - adjustment) % 360;
+                if (adjustedAngle > lowerBound && adjustedAngle < upperBound) {
+                    neighbors.add(v);
+                }
+            }
+        }
+        // do pheromes too why not
+        Iterator<Pherome> ph_it = nearby_pheromes.iterator();
+        while (ph_it.hasNext()) {
+            Pherome curr = ph_it.next();
+            if (curr.player == player_cell.player)
+                continue;
+            if (player_cell.distance(curr) > PH_AVOID_DIST)
+                continue;
+            Point currPos = curr.getPosition();
+            Point v = new Point(currPos.x - currentPosition.x, currPos.y - currentPosition.y);
+            double adjustedAngle = (getPositiveAngle(Math.toDegrees(getAngleFromVector(v)), "d") - adjustment) % 360;
+            if (adjustedAngle > lowerBound && adjustedAngle < upperBound) {
+                neighbors.add(v);
+            }
+        }
+
+        if (neighbors.size() < 1) { // case: no cells
+            return null;
+        } else if (neighbors.size() == 1 && !bounded) { // case: if only one thing nearby
+            // just move in the opposite direction
+            Point other = neighbors.get(0);
+            double otherVector = getPositiveAngle(Math.toDegrees(getAngleFromVector(other)), "d");
+            return new double[] {otherVector, otherVector + 360};
+        } else { // case: cells too close, get the widest angle
+            neighbors.sort(new Comparator<Point>() {
+                public int compare(Point v1, Point v2) {
+                    double a1 = getPositiveAngle(Math.toDegrees(getAngleFromVector(v1)), "d");
+                    double a2 = getPositiveAngle(Math.toDegrees(getAngleFromVector(v2)), "d");
+
+                    if (a1 == a2) return 0;
+                    else if (a1 < a2) return -1;
+                    else return 1;
+                }
+            });
+
+            // find widest angle
+            double lowerAngle = 0; // smaller angle that borders the widest angle
+            double widestAngle = 0;
+            for (int i = 0; i <= neighbors.size(); i++) {
+                double a1;
+                double a2;
+                if (i == 0) {
+                    a1 = (bounded ? lowerBound : getAngleFromVector(neighbors.get(neighbors.size()-1)));
+                } else {
+                    a1 = getPositiveAngle(getAngleFromVector(neighbors.get(i-1)), "r");
+                }
+                if (i == neighbors.size()) {
+                    if (bounded) {
+                        a2 = upperBound;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    a2 = getPositiveAngle(getAngleFromVector(neighbors.get(i)), "r");
+                }
+                double deltAngle = Math.abs(a2 - a1);
+                if (deltAngle > widestAngle) {
+                    widestAngle = deltAngle;
+                    lowerAngle = a1;
+                }
+            }
+
+            return new double[] {lowerAngle, lowerAngle + widestAngle};
+        }
+
     }
 }
