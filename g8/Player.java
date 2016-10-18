@@ -53,7 +53,7 @@ public class Player implements slather.sim.Player {
          Move nextMove = null;
          String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
          //System.out.println("Memory byte: " + s);
-
+/*
         if (strategy == 0) {
             //System.out.println("MOVE TO CENTER");
             nextMove = cluster(player_cell, memory, nearby_cells, nearby_pheromes);
@@ -68,8 +68,8 @@ public class Player implements slather.sim.Player {
         } else {
             nextMove = new Move(new Point(0,0), memory);
         }
-
-        nextMove = scout(player_cell, memory, nearby_cells, nearby_pheromes);
+*/
+        nextMove = tcell(player_cell, memory, nearby_cells, nearby_pheromes);
         return nextMove;
     }
 
@@ -429,8 +429,27 @@ public class Player implements slather.sim.Player {
     private Move border(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
         return new Move(new Point(0,0), memory);
     }
+
+    /*
+     * T-cell strategy: move toward big enemies
+     */
     private Move tcell(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
-        return new Move(new Point(0,0), memory);
+        Move move = null;
+
+        Cell enemy = findBiggestEnemy(player_cell, nearby_cells, nearby_pheromes);
+        if (enemy == null) {
+            return scout(player_cell, memory, nearby_cells, nearby_pheromes);
+        }
+
+        Point enemyPos = enemy.getPosition();
+        Point playerPos = player_cell.getPosition();
+        Point vector = new Point(enemyPos.x - playerPos.x, enemyPos.y - playerPos.y);
+        double magnitude = getMagnitude(vector.x, vector.y);
+
+        double moveDist = 0.5*player_cell.getDiameter()*1.01 + 0.5*enemy.getDiameter() + 0.00011;
+        Point newDest = new Point(vector.x * moveDist / magnitude, vector.y * moveDist / magnitude);
+
+        return new Move(newDest, memory);
     }
 
     // check if moving player_cell by vector collides with any nearby cell or hostile pherome
@@ -522,6 +541,25 @@ public class Player implements slather.sim.Player {
     private int getStrategy(byte memory) {
         int strategy = (memory >> 6) & 0b11;
         return strategy;
+    }
+
+    /*
+     * Looks at nearby cells and finds the biggest enemy
+     */
+    private Cell findBiggestEnemy(Cell player_cell, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
+        Cell biggestEnemy = null;
+        double maxDiam = 0;
+        boolean approachable = false;
+        for (Cell c : nearby_cells) {
+            if (c.player == player_cell.player || player_cell.distance(c) > player_cell.getDiameter() * 2)
+                continue;
+            if (c.getDiameter() > maxDiam) {
+                biggestEnemy = c;
+                maxDiam = c.getDiameter();
+            }
+        }
+
+        return biggestEnemy;
     }
 
     /*
