@@ -14,12 +14,16 @@ public class Player implements slather.sim.Player {
     private int t;
     private int sideLength;
 
-    private static int CLUSTER = 0;
-    private static int SYNC = 1;
-    private static int BORDER = 2;
-    private static int TCELL = 3;
+    // constants to label strategies
+    private static final int CLUSTER = 0;
+    private static final int SYNC = 1;
+    private static final int BORDER = 2;
+    private static final int TCELL = 3;
 
-
+    // constants for sync strategy
+    private static final int SYNC_MAX_DIR_COUNT = 12;
+    private static final int SYNC_LOOK_ARC = 120; // constrained arc to look for the next move
+    
     public void init(double d, int t, int sideLength) {
         gen = new Random();
 	    this.d = d;
@@ -359,8 +363,25 @@ public class Player implements slather.sim.Player {
         return new Move(nextPoint, memory);
     }
 
-
-
+    /* Synchronized circle strategy
+       Memory byte:
+        - 2 bits strategy
+        - 2 bits unused
+        - 4 bits direction counter
+     */
+    private Move sync(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
+        Point currPos = player_cell.getPosition();
+        Point nextVector = null;
+        byte nextMemory = memory;
+        Move nextMove = null;
+        int currCount = memory & 0b00001111;
+        
+        if (player_cell.getDiameter() >= 2) {
+            // increment direction count and reproduce
+        }
+        
+        
+    }
 
     // check if moving player_cell by vector collides with any nearby cell or hostile pherome
     private boolean collides(Cell player_cell, Point vector, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
