@@ -27,7 +27,7 @@ public class Player implements slather.sim.Player {
     private static int PH_AVOID_DIST = 2;
 
     // constants for sync strategy
-    private static final int SYNC_MAX_DIR_COUNT = 16;
+    private static int SYNC_MAX_DIR_COUNT = 16; // determined by t
     private static final int SYNC_LOOK_ARC = 240; // constrained arc to look for the next move
     private static final int SYNC_SIGHT_THRESHOLD = 5; // don't care about cells further than this when calculating widest angle for move
     private static final double SYNC_DIAMETER_TRIGGER = 1.5; // size to consider evolving behavior
@@ -41,6 +41,8 @@ public class Player implements slather.sim.Player {
         this.t = t;
         this.sideLength = sideLength;
         SYNC_ENEMY_COUNT_TRIGGER = Math.min((int)d, 4);
+        SYNC_MAX_DIR_COUNT = Math.max(t, 8);
+        SYNC_MAX_DIR_COUNT = Math.min(SYNC_MAX_DIR_COUNT, 64);
     }
 
     /*
@@ -60,7 +62,7 @@ public class Player implements slather.sim.Player {
         } else if (strategy == 1) {
             nextMove = sync(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 2) {
-            nextMove = border(player_cell, memory, nearby_cells, nearby_pheromes);
+            nextMove = scout(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 3) {
             nextMove = tcell(player_cell, memory, nearby_cells, nearby_pheromes);
         } else {
@@ -289,8 +291,8 @@ public class Player implements slather.sim.Player {
                 enemyCount++;
             }
             if (enemyCount >= SYNC_ENEMY_COUNT_TRIGGER) {
-                nextMemory = (byte) 0b00001000;
-                return cluster(player_cell, nextMemory, nearby_cells, nearby_pheromes);
+                nextMemory = (byte) 0b10000000;
+                return scout(player_cell, nextMemory, nearby_cells, nearby_pheromes);
             }
         }
 
@@ -339,8 +341,8 @@ public class Player implements slather.sim.Player {
                 insideCrowded = true;
             }
             if (insideCrowded && outsideClear) {
-                nextMemory = (byte) 0b00001000;
-                return cluster(player_cell, nextMemory, nearby_cells, nearby_pheromes);
+                nextMemory = (byte) 0b01000000;
+                return scout(player_cell, nextMemory, nearby_cells, nearby_pheromes);
             }
         } // end check if inside is crowded and outside clear to evolve
         
@@ -448,7 +450,7 @@ public class Player implements slather.sim.Player {
     }
     
     private Move border(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
-        return new Move(new Point(0,0), memory);
+        return new Move(new Point(0,0), memory);        
     }
 
     /*
