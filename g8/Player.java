@@ -22,24 +22,25 @@ public class Player implements slather.sim.Player {
 
     private static int AVOID_DIST = 2;
     private static int FRIENDLY_AVOID_DIST = 4;
-    private static double NEXT_REDUCE_MOVE = 0.7;
-    private static int MAX_TRIES = 10;
+    private static double NEXT_REDUCE_MOVE = 0.95;
+    private static int MAX_TRIES = 30;
     private static int PH_AVOID_DIST = 2;
 
     // constants for sync strategy
-    private static final int SYNC_MAX_DIR_COUNT = 32;
+    private static final int SYNC_MAX_DIR_COUNT = 16;
     private static final int SYNC_LOOK_ARC = 240; // constrained arc to look for the next move
-    private static final int SYNC_SIGHT_THRESHOLD = 2; // don't care about cells further than this when calculating widest angle for move
+    private static final int SYNC_SIGHT_THRESHOLD = 5; // don't care about cells further than this when calculating widest angle for move
     private static final double SYNC_DIAMETER_TRIGGER = 1.5; // size to consider evolving behavior
-    private static final int SYNC_ENEMY_COUNT_TRIGGER = 3; // if see this many enemies, evolve behavior
-    private static final int SYNC_INSIDE_CROWDED_THRESHOLD = 3; // if see this many friendlies to your inside, consider the group crowded
+    private static int SYNC_ENEMY_COUNT_TRIGGER = 4; // if see this many enemies, evolve behavior
+    private static final int SYNC_INSIDE_CROWDED_THRESHOLD = 4; // if see this many friendlies to your inside, consider the group crowded
 
     
     public void init(double d, int t, int sideLength) {
         gen = new Random();
-	    this.d = d;
-	    this.t = t;
+        this.d = d;
+        this.t = t;
         this.sideLength = sideLength;
+        SYNC_ENEMY_COUNT_TRIGGER = Math.min((int)d, 4);
     }
 
     /*
@@ -149,12 +150,24 @@ public class Player implements slather.sim.Player {
       Memory:
       4 bits strategy
       2 bits count
-      4 bits generation count
+      1 bit evolve to sync? (0 for evolve, 1 to never evolve)
+      3 bits generation count
      */
     private Move cluster(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
         // if can reproduce, do so and increment the generation
+        int genCount = (byte) memory & 0b00000111;
+        int evolveBit = (byte) ((memory >> 3) & 0b00000001);
+        if (genCount == 3 && evolveBit == 0) {
+            byte nextMemory = (byte) 0b01000000;
+            return sync(player_cell, nextMemory, nearby_cells, nearby_pheromes);
+        }
+
+
         if (player_cell.getDiameter() >= 2) {
-            return new Move(true, memory, memory);
+            genCount = (genCount + 1) % 16;
+            byte nextMemory = (byte) (memory & 0b11110000);
+            nextMemory = (byte) (nextMemory | genCount);
+            return new Move(true, nextMemory, nextMemory);
         }
 
 
@@ -259,7 +272,7 @@ public class Player implements slather.sim.Player {
             currCount = (currCount + 1) % SYNC_MAX_DIR_COUNT;
             byte countBits = (byte) (currCount & 0b00111111);
             nextMemory = (byte) (nextMemory & 0b11000000);
-            nextMemory = (byte) (nextMemory & countBits);
+            nextMemory = (byte) (nextMemory | countBits);
             return new Move(true, nextMemory, nextMemory);
         }
 
@@ -276,7 +289,7 @@ public class Player implements slather.sim.Player {
                 enemyCount++;
             }
             if (enemyCount >= SYNC_ENEMY_COUNT_TRIGGER) {
-                nextMemory = (byte) 0b10000000;
+                nextMemory = (byte) 0b00001000;
                 return cluster(player_cell, nextMemory, nearby_cells, nearby_pheromes);
             }
         }
@@ -326,7 +339,7 @@ public class Player implements slather.sim.Player {
                 insideCrowded = true;
             }
             if (insideCrowded && outsideClear) {
-                nextMemory = (byte) 0b10000000;
+                nextMemory = (byte) 0b00001000;
                 return cluster(player_cell, nextMemory, nearby_cells, nearby_pheromes);
             }
         } // end check if inside is crowded and outside clear to evolve
@@ -385,14 +398,26 @@ public class Player implements slather.sim.Player {
         double dx = Cell.move_dist * Math.cos(nextMoveRadians);
         double dy = Cell.move_dist * Math.sin(nextMoveRadians);
         Point nextVector = new Point(dx, dy);
-        int tries = 0;
-        while (collides(player_cell, nextVector, nearby_cells, nearby_pheromes)) {
-            if (tries >= MAX_TRIES) {
-                nextVector = new Point(0,0);
-                break;
+        if (collides(player_cell, nextVector, nearby_cells, nearby_pheromes)) {
+            // collision, move to widest arc general
+            double[] arc = getWidestAngle(player_cell, nearby_cells, nearby_pheromes);
+            double arcMin = arc[0];
+            double arcMax = arc[1];
+            widestAngle = (360 + (arcMax - arcMin) % 360) % 360;
+            nextMoveDegrees = (360 + (arcMax - widestAngle/2) % 360) % 360;
+            nextMoveRadians = Math.toRadians(nextMoveDegrees);
+            dx = Cell.move_dist * Math.cos(nextMoveRadians);
+            dy = Cell.move_dist * Math.sin(nextMoveRadians);
+            nextVector = new Point(dx, dy);
+            int tries = 0;
+            while (collides(player_cell, nextVector, nearby_cells, nearby_pheromes)) {
+                if (tries >= MAX_TRIES) {
+                    nextVector = new Point(0, 0);
+                    break;
+                }
+                nextVector = new Point(nextVector.x * NEXT_REDUCE_MOVE, nextVector.y * NEXT_REDUCE_MOVE);
+                tries++;
             }
-            nextVector = new Point(nextVector.x * NEXT_REDUCE_MOVE, nextVector.y * NEXT_REDUCE_MOVE);
-            tries++;
         }
 
         // increment count and write to new memory
