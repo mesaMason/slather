@@ -53,23 +53,19 @@ public class Player implements slather.sim.Player {
          Move nextMove = null;
          String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
          //System.out.println("Memory byte: " + s);
-/*
+
         if (strategy == 0) {
-            //System.out.println("MOVE TO CENTER");
             nextMove = cluster(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 1) {
-            //System.out.println("SCOUT");
             nextMove = sync(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 2) {
-            //System.out.println("CLUSTER");
             nextMove = border(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 3) {
             nextMove = tcell(player_cell, memory, nearby_cells, nearby_pheromes);
         } else {
             nextMove = new Move(new Point(0,0), memory);
         }
-*/
-        nextMove = tcell(player_cell, memory, nearby_cells, nearby_pheromes);
+
         return nextMove;
     }
 
