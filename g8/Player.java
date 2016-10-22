@@ -69,7 +69,7 @@ public class Player implements slather.sim.Player {
 
         if (strategy == 0) {
             //System.out.println("cluster");
-            nextMove = border(player_cell, memory, nearby_cells, nearby_pheromes);
+            nextMove = cluster(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 1) {
             //System.out.println("sync");
             nextMove = sync(player_cell, memory, nearby_cells, nearby_pheromes);
