@@ -17,22 +17,27 @@ public class Player implements slather.sim.Player {
     // constants to label strategies
     private static final int CLUSTER = 0;
     private static final int SYNC = 1;
-    private static final int SCOUT = 2;
+    private static final int BORDER = 2;
     private static final int TCELL = 3;
 
     private static int AVOID_DIST = 2;
     private static int FRIENDLY_AVOID_DIST = 4;
-    private static double NEXT_REDUCE_MOVE = 0.95;
-    private static int MAX_TRIES = 30;
+    private static double NEXT_REDUCE_MOVE = 0.8;
+    private static int MAX_TRIES = 20;
     private static int PH_AVOID_DIST = 2;
 
-    // constants for sync strategy
+    // constants for sync strategy (non final ones are determined by d, t)
     private static int SYNC_MAX_DIR_COUNT = 16; // determined by t
     private static final int SYNC_LOOK_ARC = 240; // constrained arc to look for the next move
-    private static final int SYNC_SIGHT_THRESHOLD = 5; // don't care about cells further than this when calculating widest angle for move
+    private static int SYNC_SIGHT_THRESHOLD = 5; // don't care about cells further than this when calculating widest angle for move
     private static final double SYNC_DIAMETER_TRIGGER = 1.5; // size to consider evolving behavior
     private static int SYNC_ENEMY_COUNT_TRIGGER = 4; // if see this many enemies, evolve behavior
-    private static final int SYNC_INSIDE_CROWDED_THRESHOLD = 4; // if see this many friendlies to your inside, consider the group crowded
+    private static int SYNC_INSIDE_CROWDED_THRESHOLD = 3; // if see this many friendlies situated on only 1 side of you, evolve out of sync
+    private static int SYNC_CROWDED_THRESHOLD = 5; // if see this many friendlies anywhere, evolve out of sync
+    private static final int SYNC_INSIDE_SIGHT_THRESHOLD = 8;
+    // constants for border strategy
+    private static final int BORD_SIGHT_THRESHOLD = 5;
+    private static final int BORD_MAX_BACKOFF_TRIES = 5;
 
 
     public void init(double d, int t, int sideLength) {
@@ -40,9 +45,14 @@ public class Player implements slather.sim.Player {
         this.d = d;
         this.t = t;
         this.sideLength = sideLength;
-        SYNC_ENEMY_COUNT_TRIGGER = Math.min((int)d, 4);
+
+        // initialize constants for sync strategy based on d, t
+        SYNC_ENEMY_COUNT_TRIGGER = Math.max(1 + (int) d, 6);
         SYNC_MAX_DIR_COUNT = Math.max(t, 8);
         SYNC_MAX_DIR_COUNT = Math.min(SYNC_MAX_DIR_COUNT, 64);
+        SYNC_INSIDE_CROWDED_THRESHOLD = Math.max(2 + (int) d, 10);
+        SYNC_CROWDED_THRESHOLD = (int) (SYNC_INSIDE_CROWDED_THRESHOLD * 1.4);
+        SYNC_SIGHT_THRESHOLD = (int) Math.sqrt(SYNC_MAX_DIR_COUNT);
     }
 
     /*
@@ -57,15 +67,20 @@ public class Player implements slather.sim.Player {
          String s = String.format("%8s", Integer.toBinaryString(memory & 0xFF)).replace(' ','0');
          //System.out.println("Memory byte: " + s);
 
-        if (strategy == CLUSTER) {
-            nextMove = cluster(player_cell, memory, nearby_cells, nearby_pheromes);
-        } else if (strategy == SYNC) {
+        if (strategy == 0) {
+            System.out.println("cluster");
+            nextMove = border(player_cell, memory, nearby_cells, nearby_pheromes);
+        } else if (strategy == 1) {
+            System.out.println("sync");
             nextMove = sync(player_cell, memory, nearby_cells, nearby_pheromes);
-        } else if (strategy == SCOUT) {
+        } else if (strategy == 2) {
+            System.out.println("border");
             nextMove = scout(player_cell, memory, nearby_cells, nearby_pheromes);
-        } else if (strategy == TCELL) {
+        } else if (strategy == 3) {
+            System.out.println("tcell");
             nextMove = tcell(player_cell, memory, nearby_cells, nearby_pheromes);
         } else {
+            System.out.println("null");
             nextMove = new Move(new Point(0,0), memory);
         }
 
@@ -75,7 +90,12 @@ public class Player implements slather.sim.Player {
 
     private Move scout(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
         if (player_cell.getDiameter() >= 2) {
-           return new Move(true, memory, memory);
+            int randInt = gen.nextInt() % 100;
+            if (randInt < 2) {
+                byte nm = (byte)((memory & 0b00000000) | 0b11000000);
+                return new Move(true, memory, nm);
+            }
+            return new Move(true, memory, memory);
         }
 
         int prevAngle = memory & 0b00001111;
@@ -159,7 +179,7 @@ public class Player implements slather.sim.Player {
         // if can reproduce, do so and increment the generation
         int genCount = (byte) memory & 0b00000111;
         int evolveBit = (byte) ((memory >> 3) & 0b00000001);
-        if (genCount == 3 && evolveBit == 0) {
+        if (genCount == 2 && evolveBit == 0) {
             byte nextMemory = (byte) 0b01000000;
             return sync(player_cell, nextMemory, nearby_cells, nearby_pheromes);
         }
@@ -189,21 +209,17 @@ public class Player implements slather.sim.Player {
             double distx = Math.abs(ncp.x - pcp.x);
             double disty = Math.abs(ncp.y - pcp.y);
             double distance = player_cell.distance(nc);
-            distance = distance - (player_cell.getDiameter()/2.0);
 
             if ((nc.player != player_cell.player) && (distance >= AVOID_DIST)) {
                 continue;
             }
             if ((nc.player == player_cell.player) && (distance > 1)) {
-                String s = String.format("The distance between the friendly cells is %f", distance);
-                System.out.println(s);
                 continue;
             }
 
-
             // use distance and type or set weights
             if (nc.player == player_cell.player) {
-                weight = Math.pow(0.5, 2.75*distx);
+                weight = -1/(distance-1);
             } else {
                 if (distance > 1.1)
                     weight = -0.003;
@@ -221,7 +237,6 @@ public class Player implements slather.sim.Player {
             avg_x = avg_x * (Cell.move_dist / hyp);
             avg_y = avg_y * (Cell.move_dist / hyp);
         }
-
 
         Point nextPoint = new Point(-avg_x, -avg_y);
 
@@ -257,9 +272,6 @@ public class Player implements slather.sim.Player {
             byte countBits = (byte) (currCount & 0b00111111);
             nextMemory = (byte) (nextMemory & 0b11000000);
             nextMemory = (byte) (nextMemory | countBits);
-//            int randVal = gen.nextInt() % 100;
-//            if (randVal < 0)
-//                nextMemory = (byte)0b00000000;
             return new Move(true, nextMemory, nextMemory);
         }
 
@@ -277,7 +289,7 @@ public class Player implements slather.sim.Player {
             }
             if (enemyCount >= SYNC_ENEMY_COUNT_TRIGGER) {
                 nextMemory = (byte) 0b10000000;
-                return scout(player_cell, nextMemory, nearby_cells, nearby_pheromes);
+                return border(player_cell, nextMemory, nearby_cells, nearby_pheromes);
             }
         }
 
@@ -286,52 +298,31 @@ public class Player implements slather.sim.Player {
         double nextBaseRadians = Math.atan2(nextBaseVector.y, nextBaseVector.x);
         double nextBaseDegrees = Math.toDegrees(nextBaseRadians);
 
-        // if you're big and you're on the edge of a large group, evolve behavior
-        if (player_cell.getDiameter() >= SYNC_DIAMETER_TRIGGER) {
-            double outsideDegrees = (360 + (nextBaseDegrees + 90) % 360) % 360;
-            double outDegMin = (360 + (outsideDegrees - 90) % 360) % 360;
-            double outDegMax = (360 + (outsideDegrees - 90) % 360) % 360;
-            double insideDegrees = (360 + (nextBaseDegrees - 90) % 360) % 360;
-            double inDegMin = (360 + (outsideDegrees - 90) % 360) % 360;
-            double inDegMax = (360 + (outsideDegrees - 90) % 360) % 360;
-            boolean outsideClear = true;
-            boolean insideCrowded = false;
-
-            int outsideCount = 0;
-            int insideCount = 0;
-            cell_it = nearby_cells.iterator();
-            while (cell_it.hasNext()) {
-                Cell c = cell_it.next();
-                Point neighborPos = c.getPosition();
-                if (currPos.distance(neighborPos) >= SYNC_SIGHT_THRESHOLD) {
+        // check to see if you're on the edge of a group, or if group too dense
+        cell_it = nearby_cells.iterator();
+        Set<Cell> friendlyNeighbors = new HashSet<Cell>();
+        while (cell_it.hasNext()) {
+            Cell c = cell_it.next();
+            Point cPos = c.getPosition();
+            if (c.player == player_cell.player) {
+                if (currPos.distance(cPos) >= SYNC_INSIDE_SIGHT_THRESHOLD) {
                     continue;
                 }
-                Point vectorToNeighbor = new Point(neighborPos.x - currPos.x, neighborPos.y - currPos.y);
-                double neighborRadians = Math.atan2(vectorToNeighbor.y, vectorToNeighbor.x);
-                double neighborDegrees = Math.toDegrees(neighborRadians);
-                neighborDegrees = (360 + neighborDegrees % 360) % 360; // normalize
-
-                // only consider friendly cells
-                if (c.player == player_cell.player) {
-                    if (syncAngleIsBetween(inDegMin, inDegMax, neighborDegrees)) {
-                        insideCount++;
-                    }
-                    if (syncAngleIsBetween(outDegMin, outDegMax, neighborDegrees)) {
-                        outsideClear = false;
-                        break;
-                    }
-                }
-            } // end iterate through all neighbor cells
-            if (insideCount >= SYNC_INSIDE_CROWDED_THRESHOLD) {
-                insideCrowded = true;
+                friendlyNeighbors.add(c);
             }
-            if (insideCrowded && outsideClear) {
-                nextMemory = (byte) 0b01000000;
-                return scout(player_cell, nextMemory, nearby_cells, nearby_pheromes);
+        }
+        if (friendlyNeighbors.size() >= SYNC_INSIDE_CROWDED_THRESHOLD) {
+            double[] arc = getWidestAngle(player_cell, friendlyNeighbors, new HashSet<Pherome>());
+            double diff = (360 + (arc[1] - arc[0]) % 360) % 360;
+            // if all friendlies are grouped on one side of you, or if you see too many friendlies in any direction, evolve out of sync
+            if (diff >= 180 ||
+                friendlyNeighbors.size() >= SYNC_CROWDED_THRESHOLD) {
+                nextMemory = (byte) 0b10000000;
+                return border(player_cell, nextMemory, nearby_cells, nearby_pheromes);
             }
-        } // end check if inside is crowded and outside clear to evolve
+        }
 
-        // get normalized min angle and max angle for the arc to look in
+        // get normalized min angle and max angle for the arc to look in for movement
         double degMin = (360 + (nextBaseDegrees - SYNC_LOOK_ARC/2) % 360) % 360;
         double degMax = (360 + (nextBaseDegrees + SYNC_LOOK_ARC/2) % 360) % 360;
 
@@ -434,8 +425,136 @@ public class Player implements slather.sim.Player {
         return new Point(dx, dy);
     }
 
+    /* Move away from friendlies (in widest angle)
+       Within widest angle away from friendlies, choose widest angle from enemies
+     */
     private Move border(Cell player_cell, byte memory, Set<Cell> nearby_cells, Set<Pherome> nearby_pheromes) {
-        return new Move(new Point(0,0), memory);
+        Point currPos = player_cell.getPosition();
+        Point nextVector = new Point(0, 0);
+        Move nextMove = new Move(new Point(0, 0), memory);
+
+        // reproduce if able
+        if (player_cell.getDiameter() >= 2) {
+            return new Move(true, memory, memory);
+        }
+
+        // find widest angle away from friendlies
+        Set<Cell> friendlyNeighbors = new HashSet<Cell>();
+        Set<Cell> enemyNeighbors = new HashSet<Cell>();
+        Iterator<Cell> cell_it = nearby_cells.iterator();
+        while (cell_it.hasNext()) {
+            Cell c = cell_it.next();
+            Point cPos = c.getPosition();
+            if (currPos.distance(cPos) <= BORD_SIGHT_THRESHOLD) {
+                if (c.player == player_cell.player) {
+                    friendlyNeighbors.add(c);
+                }
+                else {
+                    enemyNeighbors.add(c);
+                }
+            }
+        }
+
+        Set<Pherome> pheromeNeighbors = new HashSet<Pherome>();
+        Iterator<Pherome> pher_it = nearby_pheromes.iterator();
+        while (pher_it.hasNext()) {
+            Pherome p = pher_it.next();
+            Point pPos = p.getPosition();
+            if (currPos.distance(pPos) <= BORD_SIGHT_THRESHOLD) {
+                pheromeNeighbors.add(p);
+            }
+        }
+
+        Vector<Double> neighborAngles = new Vector<Double>(); // in degrees
+        cell_it = friendlyNeighbors.iterator();
+        while (cell_it.hasNext()) {
+            Cell c = cell_it.next();
+            Point neighborPos = c.getPosition();
+            Point vectorToNeighbor = new Point(neighborPos.x - currPos.x, neighborPos.y - currPos.y);
+            double neighborRadians = Math.atan2(vectorToNeighbor.y, vectorToNeighbor.x);
+            double neighborDegrees = Math.toDegrees(neighborRadians);
+            neighborDegrees = (360 + neighborDegrees % 360) % 360; // normalize
+            neighborAngles.add(neighborDegrees);
+        }
+
+        neighborAngles.sort(new Comparator<Double>() {
+                // sorts the angles in order of difference from min angle to max angle
+                public int compare(Double d1, Double d2) {
+                    double a = (360 + (d1) % 360) % 360;
+                    double b = (360 + (d2) % 360) % 360;
+                    if (a == b) return 0;
+                    else if (a < b) return -1;
+                    else return 1;
+                }
+            });
+
+        double[] friendlyWidestArc = null;
+        double widestAngle = 0;
+        double startAngle = 0;
+        double endAngle = 0;
+        double diffAngle = 0;
+        if (neighborAngles.size() > 1) {
+            // more than 1 friendly, get widest angle
+            double prevAngle = neighborAngles.lastElement();
+            for (double d : neighborAngles) {
+                double diff = (360 + (d - prevAngle) % 360) % 360;
+                if (diff > widestAngle) {
+                    widestAngle = diff;
+                    startAngle = prevAngle;
+                    endAngle = d;
+                }
+                prevAngle = d;
+            }
+        }
+        else if (neighborAngles.size() == 1) {
+            // one friendly, move away
+            double neighborAngle = neighborAngles.lastElement();
+            startAngle = (360 + (neighborAngle - 90) % 360) % 360;
+            endAngle = (360 + (neighborAngle + 90) % 360) % 360;
+            widestAngle = 180;
+        }
+        else {
+            startAngle = 0;
+            endAngle = 360;
+            widestAngle = 360;
+        }
+
+        double moveDegrees = (360 + ((gen.nextDouble() * widestAngle) + startAngle) % 360) % 360;
+        double moveRadians = Math.toRadians(moveDegrees);
+        double dx = Cell.move_dist * Math.cos(moveRadians);
+        double dy = Cell.move_dist * Math.sin(moveRadians);
+        nextVector = new Point(dx, dy);
+
+        // if collides, try random directions MAX_TRIES, then back off a bit and repeat
+        // BORD_MAX_BACKOFF_TRIES times
+        int backOffTries = 0;
+        double newMoveDist = Cell.move_dist;
+        while (collides(player_cell, nextVector, nearby_cells, nearby_pheromes)) {
+            if (backOffTries >= BORD_MAX_BACKOFF_TRIES) {
+                nextMove = new Move(new Point(0, 0), memory);
+                break;
+            }
+            int randomDirTries = 0;
+            while (collides(player_cell, nextVector, nearby_cells, nearby_pheromes)) {
+                if (randomDirTries >= MAX_TRIES) {
+                    break;
+                }
+                moveDegrees = (360 + ((gen.nextDouble() * widestAngle) + startAngle) % 360) % 360;
+                moveRadians = Math.toRadians(moveDegrees);
+                dx = Cell.move_dist * Math.cos(moveRadians);
+                dy = Cell.move_dist * Math.sin(moveRadians);
+                nextVector = new Point(dx, dy);
+                randomDirTries++;
+            }
+            if (!collides(player_cell, nextVector, nearby_cells, nearby_pheromes)) {
+                break;
+            }
+            newMoveDist *= NEXT_REDUCE_MOVE;
+            backOffTries++;
+        }
+
+        nextMove = new Move(nextVector, memory);
+        return nextMove;
     }
 
     /*
