@@ -68,19 +68,19 @@ public class Player implements slather.sim.Player {
          //System.out.println("Memory byte: " + s);
 
         if (strategy == 0) {
-            System.out.println("cluster");
+            //System.out.println("cluster");
             nextMove = border(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 1) {
-            System.out.println("sync");
+            //System.out.println("sync");
             nextMove = sync(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 2) {
-            System.out.println("border");
+            //System.out.println("border");
             nextMove = scout(player_cell, memory, nearby_cells, nearby_pheromes);
         } else if (strategy == 3) {
-            System.out.println("tcell");
+            //System.out.println("tcell");
             nextMove = tcell(player_cell, memory, nearby_cells, nearby_pheromes);
         } else {
-            System.out.println("null");
+            //System.out.println("null");
             nextMove = new Move(new Point(0,0), memory);
         }
 
